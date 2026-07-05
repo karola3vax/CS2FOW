@@ -1,7 +1,7 @@
 <div align="center">
 
-# [CS2FOW] (Counter-Strike 2 Fog Of War)
-
+# [CS2FOW]
+# (Counter-Strike 2 Fog Of War)
 ### Server-sided anti-wallhack occlusion culling for Counter-Strike 2 servers
 
 [![Version](https://img.shields.io/github/v/release/karola3vax/CS2FOW?style=for-the-badge&label=version)](https://github.com/karola3vax/CS2FOW/releases/latest)
