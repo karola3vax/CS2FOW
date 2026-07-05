@@ -4,12 +4,8 @@
 
 ### Server-side anti-wallhack visibility culling for Counter-Strike 2
 
-CS2FOW hides fully occluded enemies from clients using real CS2 map geometry,
-baked BVH visibility data, and fast AVX runtime checks.
-
 [![Release](https://img.shields.io/github/v/release/karola3vax/CS2FOW?label=release)](https://github.com/karola3vax/CS2FOW/releases/latest)
 [![Downloads](https://img.shields.io/github/downloads/karola3vax/CS2FOW/total?label=downloads)](https://github.com/karola3vax/CS2FOW/releases)
-[![Latest downloads](https://img.shields.io/github/downloads/karola3vax/CS2FOW/latest/total?label=latest%20downloads)](https://github.com/karola3vax/CS2FOW/releases/latest)
 [![Build](https://img.shields.io/github/actions/workflow/status/karola3vax/CS2FOW/build.yml?branch=main&label=build)](https://github.com/karola3vax/CS2FOW/actions)
 [![License](https://img.shields.io/github/license/karola3vax/CS2FOW)](LICENSE)
 
@@ -17,16 +13,21 @@ baked BVH visibility data, and fast AVX runtime checks.
 
 <table width="100%">
 <tr>
-<td align="center" width="25%"><b>🚀 Version</b><br><code>0.1.0-preview</code></td>
-<td align="center" width="25%"><b>🧩 Plugin</b><br>Metamod</td>
-<td align="center" width="25%"><b>🖥️ Servers</b><br>Windows x86_64<br>Linux x86_64</td>
-<td align="center" width="25%"><b>⚡ CPU</b><br>AVX required</td>
-</tr>
-<tr>
-<td align="center"><b>🗺️ Maps</b><br>Official<br>Custom<br>Workshop</td>
-<td align="center"><b>⚙️ Baking</b><br>Automatic on first load</td>
-<td align="center"><b>🧱 Runtime</b><br>No engine TraceRay spam</td>
-<td align="center"><b>📊 Status</b><br><code>cs2fow_status</code></td>
+<td width="65%" valign="top">
+<b>If an enemy is fully hidden by solid map geometry, CS2FOW can stop sending that enemy to the client.</b>
+<br><br>
+CS2FOW is a native Metamod plugin for Counter-Strike 2. It uses real map physics,
+baked BVH visibility data, and AVX runtime checks so wallhack cheats have no
+enemy data to draw when visibility is fully blocked.
+</td>
+<td width="35%" valign="top">
+<b>Runtime facts</b><br>
+Metamod plugin<br>
+Windows x86_64 / Linux x86_64<br>
+AVX required<br>
+Automatic map baking<br>
+No engine TraceRay runtime spam
+</td>
 </tr>
 </table>
 
