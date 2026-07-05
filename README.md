@@ -1,6 +1,6 @@
 <div align="center">
 
-# CS2FOW
+# [CS2FOW] (Counter-Strike 2 Fog Of War)
 
 ### Server-sided anti-wallhack occlusion culling for Counter-Strike 2 servers
 
