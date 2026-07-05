@@ -75,17 +75,15 @@ jobs:
 
   linux:
     runs-on: ubuntu-latest
+    container:
+      image: registry.gitlab.steamos.cloud/steamrt/sniper/sdk@sha256:2969e5a47146a6494c01d953cd818b1d62712f42f9e54c4809d7a3aa8dc276ce
     steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-
       - name: Install tools
         run: |
-          sudo apt-get update
-          sudo apt-get install -y g++ unzip
+          apt-get update
+          apt-get install -y binutils ca-certificates curl g++ git python3 unzip
+
+      - uses: actions/checkout@v4
 
       - name: Fetch build references
         run: |
@@ -114,14 +112,58 @@ jobs:
           export PYTHONPATH="$(pwd)/../references/ambuild"
           mkdir -p build-linux
           cd build-linux
-          python ../configure.py
-          python -c "from ambuild2.run import cli_run; cli_run()"
+          python3 ../configure.py
+          python3 -c "from ambuild2.run import cli_run; cli_run()"
 
       - name: Test
         run: ./build-linux/cs2fow_tests/linux-x86_64/cs2fow_tests
 
+      - name: Check SteamRT3 ABI
+        run: |
+          python3 - <<'PY'
+          import re
+          import subprocess
+          from pathlib import Path
+
+          limits = {
+              "GLIBC": (2, 31),
+              "GLIBCXX": (3, 4, 28),
+              "CXXABI": (1, 3, 12),
+          }
+          paths = [
+              Path("build-linux/cs2fow/linux-x86_64/cs2fow.so"),
+              Path("build-linux/cs2fow_baker/linux-x86_64/cs2fow_baker"),
+              Path("build-linux/cs2fow_tests/linux-x86_64/cs2fow_tests"),
+          ]
+          paths.extend(Path("tools/vrf/linux64").rglob("*"))
+          failures = []
+          for path in paths:
+              if not path.is_file():
+                  continue
+              with path.open("rb") as stream:
+                  if stream.read(4) != b"\x7fELF":
+                      continue
+              versions = subprocess.check_output(
+                  ["readelf", "--version-info", str(path)], text=True
+              )
+              found = {}
+              for family, limit in limits.items():
+                  matches = {
+                      tuple(map(int, value.split(".")))
+                      for value in re.findall(rf"\b{family}_(\d+(?:\.\d+)+)\b", versions)
+                  }
+                  found[family] = max(matches, default=())
+                  if found[family] > limit:
+                      failures.append(f"{path}: {family}_{'.'.join(map(str, found[family]))}")
+              print(path, " ".join(
+                  f"{family}_{'.'.join(map(str, version))}" for family, version in found.items() if version
+              ))
+          if failures:
+              raise SystemExit("SteamRT3 ABI exceeded:\n" + "\n".join(failures))
+          PY
+
       - name: Package
-        run: python package.py linux-x86_64
+        run: python3 package.py linux-x86_64
 
       - uses: actions/upload-artifact@v4
         with:
