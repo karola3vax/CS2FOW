@@ -18,6 +18,7 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <charconv>
 #include <chrono>
 #include <cmath>
 #include <condition_variable>
@@ -32,6 +33,7 @@
 #include <optional>
 #include <sstream>
 #include <string>
+#include <string_view>
 #include <thread>
 #include <vector>
 
@@ -42,18 +44,15 @@ namespace cs2fow
 
 constexpr uint32_t k_max_players = 64;
 constexpr uint32_t k_max_weapons = 64;
+constexpr uint32_t k_max_gamedata_offset = 4096;
 constexpr uint8_t k_life_alive = 0;
 constexpr uint8_t k_team_t = 2;
 constexpr uint8_t k_team_ct = 3;
 constexpr auto k_auto_bake_timeout = std::chrono::minutes(10);
+static_assert(MAX_EDICTS == 16384);
 
 class game_resource_service
 {
-};
-
-struct transmit_info
-{
-	CBitVec<16384> *entities;
 };
 
 struct schema_offsets
@@ -88,8 +87,6 @@ struct player_state
 	vec3 maxs;
 	float rtt_seconds {};
 	int pawn_entity {-1};
-	uint32_t weapon_count {};
-	int weapon_entities[k_max_weapons] {};
 };
 
 struct snapshot
@@ -505,7 +502,7 @@ public:
 	void OnLevelInit(char const *map_name, char const *, char const *, char const *, bool, bool) override;
 	void OnLevelShutdown() override;
 	void hook_game_frame(bool simulating, bool first_tick, bool last_tick);
-	void hook_check_transmit(CCheckTransmitInfo **infos, int count, CBitVec<16384> &, CBitVec<16384> &, const Entity2Networkable_t **, const uint16 *, int);
+	void hook_check_transmit(CCheckTransmitInfo **infos, int count, CBitVec<MAX_EDICTS> &, CBitVec<MAX_EDICTS> &, const Entity2Networkable_t **, const uint16 *, int);
 	void print_status() const;
 
 	const char *GetAuthor() override { return "karola3vax"; }
@@ -543,6 +540,8 @@ private:
 	schema_offsets fields_;
 	uint32_t recipient_slot_offset_ {};
 	uint32_t entity_system_offset_ {};
+	int game_frame_hook_id_ {};
+	int check_transmit_hook_id_ {};
 	std::string map_;
 	std::string disabled_reason_ {"no map loaded"};
 	map_source source_;
@@ -570,7 +569,7 @@ CON_COMMAND_F(cs2fow_status, "Report CS2FOW state", FCVAR_NONE)
 }
 
 SH_DECL_HOOK3_void(IServerGameDLL, GameFrame, SH_NOATTRIB, false, bool, bool, bool);
-SH_DECL_HOOK7_void(ISource2GameEntities, CheckTransmit, SH_NOATTRIB, false, CCheckTransmitInfo **, int, CBitVec<16384> &, CBitVec<16384> &, const Entity2Networkable_t **, const uint16 *, int);
+SH_DECL_HOOK7_void(ISource2GameEntities, CheckTransmit, SH_NOATTRIB, false, CCheckTransmitInfo **, int, CBitVec<MAX_EDICTS> &, CBitVec<MAX_EDICTS> &, const Entity2Networkable_t **, const uint16 *, int);
 
 bool plugin::Load(PluginId id, ISmmAPI *ismm, char *error, size_t maxlen, bool late)
 {
@@ -585,10 +584,19 @@ bool plugin::Load(PluginId id, ISmmAPI *ismm, char *error, size_t maxlen, bool l
 	GET_V_IFACE_ANY(GetServerFactory, game_entities_, ISource2GameEntities, SOURCE2GAMEENTITIES_INTERFACE_VERSION);
 	GET_V_IFACE_ANY(GetEngineFactory, g_pNetworkServerService, INetworkServerService, NETWORKSERVERSERVICE_INTERFACE_VERSION);
 	g_pCVar = cvar_;
+	game_frame_hook_id_ = SH_ADD_HOOK(IServerGameDLL, GameFrame, server_, SH_MEMBER(this, &plugin::hook_game_frame), true);
+	check_transmit_hook_id_ = SH_ADD_HOOK(ISource2GameEntities, CheckTransmit, game_entities_, SH_MEMBER(this, &plugin::hook_check_transmit), true);
+	if (game_frame_hook_id_ == 0 || check_transmit_hook_id_ == 0)
+	{
+		if (game_frame_hook_id_ != 0) SH_REMOVE_HOOK_ID(game_frame_hook_id_);
+		if (check_transmit_hook_id_ != 0) SH_REMOVE_HOOK_ID(check_transmit_hook_id_);
+		game_frame_hook_id_ = 0;
+		check_transmit_hook_id_ = 0;
+		if (error != nullptr && maxlen != 0) ismm->Format(error, maxlen, "Could not install required SourceHook hooks");
+		return false;
+	}
 	META_CONVAR_REGISTER(FCVAR_RELEASE | FCVAR_GAMEDLL);
 	g_SMAPI->AddListener(this, this);
-	SH_ADD_HOOK(IServerGameDLL, GameFrame, server_, SH_MEMBER(this, &plugin::hook_game_frame), true);
-	SH_ADD_HOOK(ISource2GameEntities, CheckTransmit, game_entities_, SH_MEMBER(this, &plugin::hook_check_transmit), true);
 
 	std::string reason;
 	const bool avx = cpu_supports_avx();
@@ -606,8 +614,10 @@ bool plugin::Unload(char *error, size_t max_length)
 {
 	automatic_baker_.stop();
 	worker_.stop();
-	SH_REMOVE_HOOK(IServerGameDLL, GameFrame, server_, SH_MEMBER(this, &plugin::hook_game_frame), true);
-	SH_REMOVE_HOOK(ISource2GameEntities, CheckTransmit, game_entities_, SH_MEMBER(this, &plugin::hook_check_transmit), true);
+	if (game_frame_hook_id_ != 0) SH_REMOVE_HOOK_ID(game_frame_hook_id_);
+	if (check_transmit_hook_id_ != 0) SH_REMOVE_HOOK_ID(check_transmit_hook_id_);
+	game_frame_hook_id_ = 0;
+	check_transmit_hook_id_ = 0;
 	ConVar_Unregister();
 	return true;
 }
@@ -642,6 +652,15 @@ bool plugin::read_gamedata(std::string &error)
 		error = "missing gamedata: " + path.string();
 		return false;
 	}
+	recipient_slot_offset_ = 0;
+	entity_system_offset_ = 0;
+#if defined(_WIN32)
+	constexpr std::string_view k_recipient_key = "recipient_slot_offset_windows";
+	constexpr std::string_view k_entity_system_key = "game_entity_system_offset_windows";
+#else
+	constexpr std::string_view k_recipient_key = "recipient_slot_offset_linux";
+	constexpr std::string_view k_entity_system_key = "game_entity_system_offset_linux";
+#endif
 	std::string line;
 	while (std::getline(stream, line))
 	{
@@ -651,18 +670,32 @@ bool plugin::read_gamedata(std::string &error)
 			continue;
 		}
 		const std::string key = line.substr(0, equals);
-		const uint32_t value = static_cast<uint32_t>(std::strtoul(line.c_str() + equals + 1u, nullptr, 10));
-#if defined(_WIN32)
-		if (key == "recipient_slot_offset_windows") recipient_slot_offset_ = value;
-		if (key == "game_entity_system_offset_windows") entity_system_offset_ = value;
-#else
-		if (key == "recipient_slot_offset_linux") recipient_slot_offset_ = value;
-		if (key == "game_entity_system_offset_linux") entity_system_offset_ = value;
-#endif
+		if (key != k_recipient_key && key != k_entity_system_key)
+		{
+			continue;
+		}
+		std::string_view text(line.data() + equals + 1u, line.size() - equals - 1u);
+		while (!text.empty() && std::isspace(static_cast<unsigned char>(text.front()))) text.remove_prefix(1);
+		while (!text.empty() && std::isspace(static_cast<unsigned char>(text.back()))) text.remove_suffix(1);
+		uint32_t value {};
+		const auto [end, conversion_error] = std::from_chars(text.data(), text.data() + text.size(), value);
+		if (text.empty() || conversion_error != std::errc {} || end != text.data() + text.size())
+		{
+			error = "invalid gamedata value for " + key;
+			return false;
+		}
+		if (key == k_recipient_key) recipient_slot_offset_ = value;
+		if (key == k_entity_system_key) entity_system_offset_ = value;
 	}
 	if (recipient_slot_offset_ == 0 || entity_system_offset_ == 0)
 	{
 		error = "gamedata does not contain this platform's required offsets";
+		return false;
+	}
+	if (recipient_slot_offset_ < sizeof(CCheckTransmitInfo) || recipient_slot_offset_ > k_max_gamedata_offset || recipient_slot_offset_ % alignof(int) != 0
+		|| entity_system_offset_ < sizeof(void *) || entity_system_offset_ > k_max_gamedata_offset || entity_system_offset_ % alignof(void *) != 0)
+	{
+		error = "gamedata contains invalid offsets for this platform";
 		return false;
 	}
 	return true;
@@ -954,20 +987,6 @@ bool plugin::capture(snapshot &value)
 		{
 			player.rtt_seconds = std::max(0.0f, channel->GetEngineLatency());
 		}
-		void *services = field<void *>(pawn_entity, fields_.weapon_services);
-		if (services != nullptr)
-		{
-			auto *weapons = reinterpret_cast<CUtlVector<CEntityHandle> *>(reinterpret_cast<uintptr_t>(services) + fields_.weapons);
-			for (int i = 0; i < weapons->Count() && player.weapon_count < k_max_weapons; ++i)
-			{
-				CEntityInstance *weapon = system->GetEntityInstance((*weapons)[i]);
-				const int index = entity_index(weapon);
-				if (index > 0)
-				{
-					player.weapon_entities[player.weapon_count++] = index;
-				}
-			}
-		}
 	}
 	return true;
 }
@@ -1009,9 +1028,14 @@ void plugin::hook_game_frame(bool simulating, bool first_tick, bool last_tick)
 	});
 }
 
-void plugin::hook_check_transmit(CCheckTransmitInfo **infos, int count, CBitVec<16384> &, CBitVec<16384> &, const Entity2Networkable_t **, const uint16 *, int)
+void plugin::hook_check_transmit(CCheckTransmitInfo **infos, int count, CBitVec<MAX_EDICTS> &, CBitVec<MAX_EDICTS> &, const Entity2Networkable_t **, const uint16 *, int)
 {
-	if (!cs2fow_enable.Get() || !disabled_reason_.empty())
+	if (!cs2fow_enable.Get() || !disabled_reason_.empty() || infos == nullptr || count <= 0 || count > static_cast<int>(k_max_players))
+	{
+		return;
+	}
+	CGameEntitySystem *system = entity_system();
+	if (system == nullptr)
 	{
 		return;
 	}
@@ -1021,36 +1045,67 @@ void plugin::hook_check_transmit(CCheckTransmitInfo **infos, int count, CBitVec<
 	{
 		return;
 	}
+	const auto valid_entity_index = [](int index) { return index > 0 && index < MAX_EDICTS; };
+	const auto current_player_pawn = [&](uint32_t slot, const player_state &saved)
+	{
+		CEntityInstance *controller_entity = controller(slot);
+		if (!saved.valid || controller_entity == nullptr || field<bool>(controller_entity, fields_.is_hltv))
+		{
+			return static_cast<CEntityInstance *>(nullptr);
+		}
+		CEntityInstance *pawn_entity = pawn(controller_entity);
+		if (pawn_entity == nullptr || entity_index(pawn_entity) != saved.pawn_entity || !valid_entity_index(saved.pawn_entity)
+			|| field<uint8_t>(pawn_entity, fields_.life_state) != k_life_alive)
+		{
+			return static_cast<CEntityInstance *>(nullptr);
+		}
+		const uint8_t team = field<uint8_t>(pawn_entity, fields_.team);
+		return team == saved.team && (team == k_team_t || team == k_team_ct) ? pawn_entity : nullptr;
+	};
 	for (int i = 0; i < count; ++i)
 	{
-		auto *info = reinterpret_cast<transmit_info *>(infos[i]);
-		if (info == nullptr || info->entities == nullptr)
+		CCheckTransmitInfo *info = infos[i];
+		if (info == nullptr || info->m_pTransmitEntity == nullptr)
 		{
 			continue;
 		}
-		const int slot = *reinterpret_cast<int *>(reinterpret_cast<uintptr_t>(info) + recipient_slot_offset_);
+		int slot = -1;
+		std::memcpy(&slot, reinterpret_cast<const char *>(info) + recipient_slot_offset_, sizeof(slot));
 		if (slot < 0 || slot >= static_cast<int>(k_max_players) || !result->players[slot].valid)
+		{
+			continue;
+		}
+		const player_state &observer = result->players[slot];
+		if (current_player_pawn(static_cast<uint32_t>(slot), observer) == nullptr)
 		{
 			continue;
 		}
 		for (uint32_t target = 0; target < k_max_players; ++target)
 		{
 			const player_state &player = result->players[target];
-			if (result->visible[slot][target] || !player.valid)
+			if (result->visible[slot][target] || !player.valid || player.team == observer.team)
 			{
 				continue;
 			}
-			CEntityInstance *current_pawn = pawn(controller(target));
-			if (entity_index(current_pawn) != player.pawn_entity || player.pawn_entity <= 0)
+			CEntityInstance *current_pawn = current_player_pawn(target, player);
+			if (current_pawn == nullptr)
 			{
 				continue;
 			}
-			info->entities->Clear(player.pawn_entity);
-			for (uint32_t weapon = 0; weapon < player.weapon_count; ++weapon)
+			info->m_pTransmitEntity->Clear(player.pawn_entity);
+			void *services = field<void *>(current_pawn, fields_.weapon_services);
+			if (services == nullptr)
 			{
-				if (player.weapon_entities[weapon] > 0)
+				continue;
+			}
+			auto *weapons = reinterpret_cast<CUtlVector<CEntityHandle> *>(reinterpret_cast<uintptr_t>(services) + fields_.weapons);
+			const int weapon_count = std::min(weapons->Count(), static_cast<int>(k_max_weapons));
+			for (int weapon = 0; weapon < weapon_count; ++weapon)
+			{
+				const int index = entity_index(system->GetEntityInstance((*weapons)[weapon]));
+				if (valid_entity_index(index))
 				{
-					info->entities->Clear(player.weapon_entities[weapon]);
+					info->m_pTransmitEntity->Clear(index);
 				}
 			}
 		}
