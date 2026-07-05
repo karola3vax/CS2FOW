@@ -12,25 +12,11 @@
 
 </div>
 
-<table width="100%">
-<tr>
-<td width="65%" valign="top">
-<b>If an enemy is fully hidden by solid map geometry, CS2FOW can stop sending that enemy to the client.</b>
-<br><br>
-CS2FOW is a native Metamod plugin for Counter-Strike 2. It uses real map physics,
-baked BVH visibility data, and AVX runtime checks so wallhack cheats have no
-enemy data to draw when visibility is fully blocked.
-</td>
-<td width="35%" valign="top">
-<b>Runtime facts</b><br>
-Metamod plugin<br>
-Windows x86_64 / Linux x86_64<br>
-AVX required<br>
-Automatic map baking<br>
-No engine TraceRay runtime spam
-</td>
-</tr>
-</table>
+<div align="center">
+
+![CS2FOW demonstration](docs/CS2FOW.gif)
+
+</div>
 
 ## How It Works
 
