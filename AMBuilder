@@ -15,7 +15,8 @@ def configure(compiler, plugin=False):
     compiler.cflags += ['/MTd'] if builder.options.debug else ['/MT']
     compiler.defines += ['_CRT_SECURE_NO_WARNINGS', 'NOMINMAX']
   else:
-    compiler.cflags += ['-Wall', '-Wextra', '-Wpedantic', '-mavx']
+    compiler.cflags += ['-Wall', '-Wextra', '-Wpedantic', '-mavx', '-pthread']
+    compiler.linkflags += ['-pthread']
     compiler.cxxflags += ['-std=c++20']
     if plugin:
       compiler.defines += ['stricmp=strcasecmp', '_stricmp=strcasecmp', '_snprintf=snprintf', '_vsnprintf=vsnprintf', 'HAVE_STDINT_H', 'GNUC']
