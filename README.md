@@ -86,6 +86,9 @@ Download from the latest release:
 
 https://github.com/karola3vax/CS2FOW/releases/latest
 
+Common questions about performance, latency, wallbangs, sound, radar, smokes,
+map baking, and troubleshooting are covered in [FAQ.md](FAQ.md).
+
 The optional official map prebakes from `v0.1.0-preview` remain compatible:
 
 ```text
