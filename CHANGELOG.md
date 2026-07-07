@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.2-preview
+
+- Further hardened CheckTransmit player lifecycle checks.
+- Hide pawn, current weapons, wearables, and carried hostage prop as one group.
+- Preserve fail-open behavior when live player state is uncertain.
+
 ## 0.1.1-preview
 
 - Hardened CheckTransmit against invalid indexes, stale player state, and stale weapon handles.

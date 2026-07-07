@@ -70,7 +70,7 @@ jobs:
         with:
           name: cs2fow-windows-x86_64
           path: |
-            packages/cs2fow-0.1.1-preview-windows-x86_64.zip
+            packages/cs2fow-0.1.2-preview-windows-x86_64.zip
             packages/SHA256SUMS.txt
 
   linux:
@@ -171,5 +171,5 @@ jobs:
         with:
           name: cs2fow-linux-x86_64
           path: |
-            packages/cs2fow-0.1.1-preview-linux-x86_64.zip
+            packages/cs2fow-0.1.2-preview-linux-x86_64.zip
             packages/SHA256SUMS.txt

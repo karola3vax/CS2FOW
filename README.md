@@ -389,9 +389,9 @@ In a 12v12 worst-case test, the old trace-based approach could hit around
 <tr>
 <td width="33%"><b>1. Pick your core package</b><br><br>
 Windows:<br>
-<code>cs2fow-0.1.1-preview-windows-x86_64.zip</code><br><br>
+<code>cs2fow-0.1.2-preview-windows-x86_64.zip</code><br><br>
 Linux:<br>
-<code>cs2fow-0.1.1-preview-linux-x86_64.zip</code>
+<code>cs2fow-0.1.2-preview-linux-x86_64.zip</code>
 </td>
 <td width="33%"><b>2. Extract into CS2</b><br><br>
 Extract the package into your server's:<br><br>

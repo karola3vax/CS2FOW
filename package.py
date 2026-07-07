@@ -9,7 +9,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
 PACKAGES = ROOT / "packages"
-VERSION = "0.1.1-preview"
+VERSION = "0.1.2-preview"
 
 
 def copy_file(source: Path, target: Path) -> None:
