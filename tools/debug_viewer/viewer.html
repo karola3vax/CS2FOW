@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link rel="icon" href="data:,">
+    <title>CS2FOW Debug Viewer</title>
+    <style>
+        :root { color-scheme: dark; font-family: Segoe UI, Arial, sans-serif; }
+        body { margin: 0; background: #0b0e12; color: #e8eef7; overflow: hidden; }
+        #view { position: fixed; inset: 0; }
+        #panel {
+            position: fixed; top: 12px; left: 12px; width: 360px; max-height: calc(100vh - 24px);
+            overflow: auto; background: rgba(11, 14, 18, .92); border: 1px solid #2c3440;
+            border-radius: 6px; padding: 12px; box-sizing: border-box;
+        }
+        h1 { font-size: 18px; margin: 0 0 10px; }
+        fieldset { border: 1px solid #2c3440; border-radius: 6px; margin: 10px 0; padding: 10px; }
+        legend { color: #9db6d8; padding: 0 5px; }
+        label { display: grid; grid-template-columns: 120px 1fr; gap: 8px; align-items: center; margin: 6px 0; font-size: 13px; }
+        input, select, button { background: #151b23; color: #e8eef7; border: 1px solid #3a4656; border-radius: 4px; padding: 5px; }
+        input[type="file"] { width: 100%; }
+        button { cursor: pointer; }
+        .row { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 6px; }
+        .row label { display: block; margin: 0; }
+        .row input { width: 100%; box-sizing: border-box; }
+        .status { white-space: pre-wrap; font: 12px Consolas, monospace; color: #bdd2ef; }
+        .ok { color: #7ee787; }
+        .bad { color: #ff7b72; }
+        .hint { color: #9da7b3; font-size: 12px; line-height: 1.35; }
+    </style>
+</head>
+<body>
+<canvas id="view"></canvas>
+<aside id="panel">
+    <h1>CS2FOW Debug Viewer</h1>
+    <div id="self-check" class="status">self-check: pending</div>
+
+    <fieldset>
+        <legend>Assets</legend>
+        <label>Model
+            <select id="model-select">
+                <option value="ct_sas">CT SAS</option>
+                <option value="t_phoenix">T Phoenix</option>
+            </select>
+        </label>
+        <label>Animation <select id="animation-select"><option value="">none</option></select></label>
+        <div class="hint">Run <code>export_assets.py</code> first, or load GLBs manually.</div>
+        <label>CT GLB <input id="ct-file" type="file" accept=".glb,.gltf"></label>
+        <label>T GLB <input id="t-file" type="file" accept=".glb,.gltf"></label>
+        <label>BVH8 <input id="bvh-file" type="file" accept=".bvh8"></label>
+    </fieldset>
+
+    <fieldset>
+        <legend>Observer</legend>
+        <label>Ping ms <input id="ping" type="number" value="50" step="1"></label>
+        <div class="row">
+            <label>Eye X<input id="eye-x" type="number" value="-180" step="1"></label>
+            <label>Eye Y<input id="eye-y" type="number" value="0" step="1"></label>
+            <label>Eye Z<input id="eye-z" type="number" value="64" step="1"></label>
+        </div>
+        <div class="row">
+            <label>Vel X<input id="obs-vx" type="number" value="250" step="1"></label>
+            <label>Vel Y<input id="obs-vy" type="number" value="0" step="1"></label>
+            <label>Vel Z<input id="obs-vz" type="number" value="0" step="1"></label>
+        </div>
+    </fieldset>
+
+    <fieldset>
+        <legend>Target</legend>
+        <div class="row">
+            <label>Origin X<input id="target-x" type="number" value="180" step="1"></label>
+            <label>Origin Y<input id="target-y" type="number" value="0" step="1"></label>
+            <label>Origin Z<input id="target-z" type="number" value="0" step="1"></label>
+        </div>
+        <div class="row">
+            <label>Vel X<input id="target-vx" type="number" value="-250" step="1"></label>
+            <label>Vel Y<input id="target-vy" type="number" value="0" step="1"></label>
+            <label>Vel Z<input id="target-vz" type="number" value="0" step="1"></label>
+        </div>
+        <div class="row">
+            <label>Min X<input id="min-x" type="number" value="-16" step="1"></label>
+            <label>Min Y<input id="min-y" type="number" value="-16" step="1"></label>
+            <label>Min Z<input id="min-z" type="number" value="0" step="1"></label>
+        </div>
+        <div class="row">
+            <label>Max X<input id="max-x" type="number" value="16" step="1"></label>
+            <label>Max Y<input id="max-y" type="number" value="16" step="1"></label>
+            <label>Max Z<input id="max-z" type="number" value="72" step="1"></label>
+        </div>
+    </fieldset>
+
+    <fieldset>
+        <legend>Status</legend>
+        <div id="status" class="status">loading manifest...</div>
+    </fieldset>
+</aside>
+<script type="module" src="./viewer.js"></script>
+</body>
+</html>
