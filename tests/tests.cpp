@@ -231,7 +231,7 @@ struct test_transmit_mask
 void test_visibility_sampling()
 {
 	const bvh8_data open = test_world({{{10000, 10000, 10000}, {10001, 10000, 10000}, {10000, 10001, 10000}}});
-	const visibility_tuning tuning {1, 200, 500, 96.0f};
+	const visibility_tuning tuning {1, 200, 500, 160.0f};
 	visibility_player player {};
 	player.eye = {0, 0, 0};
 	player.origin = {0, 0, 0};
@@ -247,19 +247,29 @@ void test_visibility_sampling()
 	assert(std::fabs(visibility_effective_lookahead_seconds(0.15f, tuning) - 0.5f) < 0.001f);
 	assert(std::fabs(visibility_effective_lookahead_seconds(0.2f, tuning) - 0.5f) < 0.001f);
 
+	assert(visibility_prediction_offset({0, 0, 0}, 0.2f, 160.0f).x == 0.0f);
+	assert(visibility_prediction_offset({1, 0, 0}, 0.2f, 160.0f).x == 0.0f);
+	assert(std::fabs(visibility_prediction_offset({10, 0, 0}, 0.2f, 160.0f).x - 16.0f) < 0.01f);
+	assert(std::fabs(visibility_prediction_offset({50, 0, 0}, 0.2f, 160.0f).x - 32.0f) < 0.01f);
+	assert(std::fabs(visibility_prediction_offset({100, 0, 0}, 0.2f, 160.0f).x - 64.0f) < 0.01f);
+	assert(std::fabs(visibility_prediction_offset({200, 0, 0}, 0.2f, 160.0f).x - 96.0f) < 0.01f);
+	assert(std::fabs(visibility_prediction_offset({275, 0, 0}, 0.2f, 160.0f).x - 128.0f) < 0.01f);
+	assert(std::fabs(visibility_prediction_offset({300, 0, 0}, 0.2f, 160.0f).x - 160.0f) < 0.01f);
+	assert(std::fabs(visibility_prediction_offset({300, 0, 0}, 0.2f, 80.0f).x - 80.0f) < 0.01f);
+
 	player.velocity = {100, 0, 0};
 	auto origins = visibility_origins(open, player, tuning, visibility_effective_lookahead_seconds(0.0f, tuning));
 	assert(k_visibility_origin_count == 10);
 	assert(k_visibility_ray_count == 160);
-	assert(std::fabs(origins[1].x - 96.0f) < 0.01f && origins[1].y == 0.0f);
+	assert(std::fabs(origins[1].x - 64.0f) < 0.01f && origins[1].y == 0.0f);
 	assert(std::fabs(origins[2].y - 24.0f) < 0.01f);
 	assert(std::fabs(origins[3].y + 24.0f) < 0.01f);
-	assert(std::fabs(origins[4].x - 96.0f) < 0.01f && std::fabs(origins[4].y - 24.0f) < 0.01f);
-	assert(std::fabs(origins[5].x - 96.0f) < 0.01f && std::fabs(origins[5].y + 24.0f) < 0.01f);
+	assert(std::fabs(origins[4].x - 64.0f) < 0.01f && std::fabs(origins[4].y - 24.0f) < 0.01f);
+	assert(std::fabs(origins[5].x - 64.0f) < 0.01f && std::fabs(origins[5].y + 24.0f) < 0.01f);
 	assert(std::fabs(origins[6].z - 24.0f) < 0.01f);
 	assert(std::fabs(origins[7].z + 24.0f) < 0.01f);
-	assert(std::fabs(origins[8].x - 96.0f) < 0.01f && std::fabs(origins[8].z - 24.0f) < 0.01f);
-	assert(std::fabs(origins[9].x - 96.0f) < 0.01f && std::fabs(origins[9].z + 24.0f) < 0.01f);
+	assert(std::fabs(origins[8].x - 64.0f) < 0.01f && std::fabs(origins[8].z - 24.0f) < 0.01f);
+	assert(std::fabs(origins[9].x - 64.0f) < 0.01f && std::fabs(origins[9].z + 24.0f) < 0.01f);
 
 	player.velocity = {};
 	player.eye_yaw_degrees = 90.0f;
@@ -270,11 +280,11 @@ void test_visibility_sampling()
 
 	player.velocity = {0, 10, 0};
 	origins = visibility_origins(open, player, tuning, visibility_effective_lookahead_seconds(0.0f, tuning));
-	assert(std::fabs(origins[1].y - 96.0f) < 0.01f);
+	assert(std::fabs(origins[1].y - 16.0f) < 0.01f);
 
 	player.velocity = {1000, 0, 0};
 	origins = visibility_origins(open, player, tuning, visibility_effective_lookahead_seconds(0.0f, tuning));
-	assert(std::fabs(origins[1].x - 100.0f) < 0.01f);
+	assert(std::fabs(origins[1].x - 160.0f) < 0.01f);
 
 	visibility_tuning disabled = tuning;
 	disabled.max_lookahead_ms = 0;
@@ -526,7 +536,7 @@ void test_hidden_entity_group()
 double benchmark_worker_loop(const bvh8_data &data, const std::string &label)
 {
 	constexpr uint32_t k_players = 32;
-	const visibility_tuning tuning {1, 200, 500, 96.0f};
+	const visibility_tuning tuning {1, 200, 500, 160.0f};
 	std::mt19937 random(0x51f0u);
 	std::uniform_real_distribution<float> x(data.header.world_min[0], data.header.world_max[0]);
 	std::uniform_real_distribution<float> y(data.header.world_min[1], data.header.world_max[1]);

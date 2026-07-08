@@ -1,11 +1,12 @@
 import * as THREE from "https://esm.sh/three@0.160.0";
 import {OrbitControls} from "https://esm.sh/three@0.160.0/examples/jsm/controls/OrbitControls.js";
 import {GLTFLoader} from "https://esm.sh/three@0.160.0/examples/jsm/loaders/GLTFLoader.js";
+import {OBJLoader} from "https://esm.sh/three@0.160.0/examples/jsm/loaders/OBJLoader.js";
 
 const k_source_units_per_meter = 39.3700787;
 const k_max_prediction_speed = 500.0;
 const k_min_prediction_speed = 1.0;
-const k_bounds_inflate = 16.0;
+const k_bounds_inflate = 12.0;
 const k_shoulder_origin_offset = 24.0;
 const k_vertical_origin_offset = 24.0;
 const k_same_point_epsilon_sq = 1.0e-4;
@@ -13,10 +14,20 @@ const k_rtt_lookahead_scale = 2.0;
 const k_degrees_to_radians = 0.017453292519943295769;
 const k_min_lookahead_ms = 200.0;
 const k_max_lookahead_ms = 500.0;
-const k_peek_margin_units = 96.0;
+const k_peek_margin_units = 160.0;
 const k_visibility_origin_count = 10;
 const k_visibility_target_count = 16;
 const k_visibility_ray_count = k_visibility_origin_count * k_visibility_target_count;
+const k_origin_labels = [
+	"eye", "predicted eye", "left shoulder", "right shoulder", "predicted left shoulder",
+	"predicted right shoulder", "eye +24z", "eye -24z", "predicted eye +24z", "predicted eye -24z"
+];
+const k_target_labels = [
+	"min/min/min", "max/min/min", "min/max/min", "max/max/min",
+	"min/min/max", "max/min/max", "min/max/max", "max/max/max",
+	"x-min face", "x-max face", "y-min face", "y-max face",
+	"bottom face", "top face", "center", "upper/chest"
+];
 
 const k_bvh8_version = 1;
 const k_bvh8_known_flags = 1;
@@ -36,7 +47,9 @@ let controls;
 let scene;
 let clock;
 let loader;
+let obj_loader;
 let model_group;
+let map_group;
 let overlay_group;
 let hit_group;
 let active_model_key = "ct_sas";
@@ -44,6 +57,7 @@ let active_model = null;
 let active_mixer = null;
 let active_bvh = null;
 let status_extra = "No BVH8 loaded.";
+let map_status = "Map OBJ: none.";
 const loaded_models = new Map();
 const model_paths = new Map();
 const loading_models = new Set();
@@ -148,9 +162,35 @@ function visibility_prediction_offset(velocity, seconds)
 	}
 
 	const capped_speed = Math.min(speed, k_max_prediction_speed);
-	const distance = Math.max(capped_speed * seconds, k_peek_margin_units);
+	const distance = Math.max(capped_speed * seconds, stepped_peek_margin(speed, k_peek_margin_units));
 	const scale = distance / speed;
 	return vec3(velocity.x * scale, velocity.y * scale, 0);
+}
+
+function stepped_peek_margin(speed, max_margin)
+{
+	max_margin = Math.max(0, max_margin);
+	if (speed < 25)
+	{
+		return max_margin * 0.10;
+	}
+	if (speed < 75)
+	{
+		return max_margin * 0.20;
+	}
+	if (speed < 150)
+	{
+		return max_margin * 0.40;
+	}
+	if (speed < 250)
+	{
+		return max_margin * 0.60;
+	}
+	if (speed < 300)
+	{
+		return max_margin * 0.80;
+	}
+	return max_margin;
 }
 
 function player_bounds(player, origin, inflate)
@@ -236,6 +276,8 @@ function visibility_origins(bvh, player, lookahead_seconds)
 function visibility_targets(bvh, player, lookahead_seconds)
 {
 	let box = player_bounds(player, player.origin, k_bounds_inflate);
+	const current_box = box;
+	let future_box = null;
 	const offset = visibility_prediction_offset(player.velocity, lookahead_seconds);
 	if (distance_sq(vec3(), offset) > k_same_point_epsilon_sq)
 	{
@@ -243,6 +285,7 @@ function visibility_targets(bvh, player, lookahead_seconds)
 		if (!bvh || !bvh.segment_blocked(center_bounds(box), center_bounds(future)).blocked)
 		{
 			box = merge_bounds(box, future);
+			future_box = future;
 		}
 	}
 
@@ -250,6 +293,8 @@ function visibility_targets(bvh, player, lookahead_seconds)
 	const upper = vec3(middle.x, middle.y, box.min.z + (box.max.z - box.min.z) * 0.75);
 	return {
 		box,
+		current_box,
+		future_box,
 		points: [
 			vec3(box.min.x, box.min.y, box.min.z), vec3(box.max.x, box.min.y, box.min.z),
 			vec3(box.min.x, box.max.y, box.min.z), vec3(box.max.x, box.max.y, box.min.z),
@@ -588,6 +633,62 @@ function clear_group(group)
 	}
 }
 
+function convert_source_geometry(geometry)
+{
+	const positions = geometry.getAttribute("position");
+	if (!positions)
+	{
+		return;
+	}
+	for (let i = 0; i < positions.count; ++i)
+	{
+		const x = positions.getX(i);
+		const y = positions.getY(i);
+		const z = positions.getZ(i);
+		positions.setXYZ(i, y / k_source_units_per_meter, z / k_source_units_per_meter, x / k_source_units_per_meter);
+	}
+	positions.needsUpdate = true;
+	geometry.computeBoundingBox();
+	geometry.computeBoundingSphere();
+	geometry.computeVertexNormals();
+}
+
+function load_map_obj_from_url(url)
+{
+	obj_loader.load(
+		url,
+		(object) =>
+		{
+			clear_group(map_group);
+			const material = new THREE.MeshBasicMaterial({
+				color: 0xaeb8c6,
+				wireframe: true,
+				transparent: true,
+				opacity: 0.18,
+				depthWrite: false
+			});
+			object.traverse((node) =>
+			{
+				if (node.isMesh)
+				{
+					convert_source_geometry(node.geometry);
+					node.material = material;
+				}
+			});
+			map_group.add(object);
+			map_status = "Map OBJ loaded. Visual only; BVH8 decides blocking.";
+			update_scene();
+		},
+		undefined,
+		(error) =>
+		{
+			clear_group(map_group);
+			map_status = `Map OBJ failed: ${error.message || error}`;
+			update_scene();
+		}
+	);
+}
+
 function make_line(points, color, opacity = 1.0)
 {
 	const geometry = new THREE.BufferGeometry().setFromPoints(points.map(source_to_three));
@@ -808,7 +909,11 @@ function update_scene()
 	const uninflated_box = player_bounds(target, target.origin, 0);
 
 	add_box(overlay_group, uninflated_box, 0x82aaff, 0.9);
-	add_box(overlay_group, targets.box, 0xffd166, 0.75);
+	add_box(overlay_group, targets.current_box, 0xffd166, 0.75);
+	if (targets.future_box)
+	{
+		add_box(overlay_group, targets.box, 0xff8f3d, 0.85);
+	}
 
 	for (let i = 0; i < origins.length; ++i)
 	{
@@ -862,11 +967,16 @@ function update_scene()
 	const bvh_text = active_bvh ? active_bvh.info_text() : "BVH8: none";
 	$("status").textContent = [
 		status_extra,
+		map_status,
 		`lookahead=${(lookahead * 1000).toFixed(0)}ms ping=${ping_ms.toFixed(0)}ms yaw=${observer.eye_yaw_degrees.toFixed(0)}deg`,
 		`observer origins=${origins.length} target points=${targets.points.length} segments=${origins.length * targets.points.length}`,
-		`blocked=${blocked_count}/${k_visibility_ray_count} hidden=${hidden ? "yes" : "no"}`,
-		`target inflated box min=(${format_vec(targets.box.min)})`,
-		`target inflated box max=(${format_vec(targets.box.max)})`,
+		`blocked=${blocked_count}/${k_visibility_ray_count} decision=${hidden ? "HIDE" : "SHOW"}`,
+		`target current inflated min=(${format_vec(targets.current_box.min)})`,
+		`target current inflated max=(${format_vec(targets.current_box.max)})`,
+		`target sampled box swept=${targets.future_box ? "yes" : "no"} min=(${format_vec(targets.box.min)})`,
+		`target sampled box swept=${targets.future_box ? "yes" : "no"} max=(${format_vec(targets.box.max)})`,
+		`origins: ${k_origin_labels.map((label, index) => `O${index}=${label}`).join(", ")}`,
+		`targets: ${k_target_labels.map((label, index) => `T${index}=${label}`).join(", ")}`,
 		bvh_text
 	].join("\n");
 }
@@ -885,6 +995,14 @@ function run_self_checks()
 	expect(Math.abs(effective_lookahead_seconds(0) - 0.2) < 1.0e-6, "0 ping lookahead");
 	expect(Math.abs(effective_lookahead_seconds(50) - 0.3) < 1.0e-6, "50 ping lookahead");
 	expect(Math.abs(effective_lookahead_seconds(150) - 0.5) < 1.0e-6, "150 ping lookahead clamp");
+	expect(visibility_prediction_offset(vec3(0, 0, 0), 0.2).x === 0, "0 speed margin");
+	expect(visibility_prediction_offset(vec3(1, 0, 0), 0.2).x === 0, "1 speed margin");
+	expect(Math.abs(visibility_prediction_offset(vec3(10, 0, 0), 0.2).x - 16) < 1.0e-6, "10 speed margin");
+	expect(Math.abs(visibility_prediction_offset(vec3(50, 0, 0), 0.2).x - 32) < 1.0e-6, "50 speed margin");
+	expect(Math.abs(visibility_prediction_offset(vec3(100, 0, 0), 0.2).x - 64) < 1.0e-6, "100 speed margin");
+	expect(Math.abs(visibility_prediction_offset(vec3(200, 0, 0), 0.2).x - 96) < 1.0e-6, "200 speed margin");
+	expect(Math.abs(visibility_prediction_offset(vec3(275, 0, 0), 0.2).x - 128) < 1.0e-6, "275 speed margin");
+	expect(Math.abs(visibility_prediction_offset(vec3(300, 0, 0), 0.2).x - 160) < 1.0e-6, "300 speed margin");
 	const origins_yaw0 = visibility_origins(null, {eye: vec3(), velocity: vec3(250, 0, 0), eye_yaw_degrees: 0}, 0.2);
 	const origins_yaw90 = visibility_origins(null, {eye: vec3(), velocity: vec3(), eye_yaw_degrees: 90}, 0.2);
 	expect(origins_yaw0.length === 10, "origin count");
@@ -925,10 +1043,12 @@ function init_scene()
 
 	clock = new THREE.Clock();
 	loader = new GLTFLoader();
+	obj_loader = new OBJLoader();
+	map_group = new THREE.Group();
 	model_group = new THREE.Group();
 	overlay_group = new THREE.Group();
 	hit_group = new THREE.Group();
-	scene.add(model_group, overlay_group, hit_group);
+	scene.add(map_group, model_group, overlay_group, hit_group);
 
 	const light = new THREE.HemisphereLight(0xffffff, 0x252a33, 2.2);
 	scene.add(light);
@@ -979,6 +1099,16 @@ function install_ui()
 			active_bvh = null;
 			status_extra = `Failed to load BVH8: ${error.message || error}`;
 			update_scene();
+		}
+	});
+	$("map-obj-file").addEventListener("change", (event) =>
+	{
+		const file = event.target.files[0];
+		if (file)
+		{
+			map_status = "Loading map OBJ...";
+			update_scene();
+			load_map_obj_from_url(URL.createObjectURL(file));
 		}
 	});
 

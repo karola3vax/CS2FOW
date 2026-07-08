@@ -35,4 +35,12 @@ Use the BVH8 file picker to load a bake such as:
 data/maps/de_mirage.bvh8
 ```
 
-The viewer uses the current CS2FOW constants: `200ms + ping * 2`, `500ms` cap, `96u` peek margin, `16u` target inflation, `24u` observer shoulder offset from yaw, and `24u` vertical observer offset.
+Use the optional Map OBJ picker for visual context. The OBJ must come from a baker debug export, for example:
+
+```powershell
+tools\cs2fow_baker.exe --game "C:\Users\karola3vax\Desktop\server" --map de_mirage --debug-obj "%TEMP%\de_mirage.obj"
+```
+
+The OBJ is only drawn as a transparent wireframe. The loaded `.bvh8` still decides which rays are blocked.
+
+The viewer uses the current CS2FOW constants: `200ms + ping * 2`, `500ms` cap, speed-stepped `160u` maximum peek margin, `12u` target inflation, `24u` observer shoulder offset from yaw, and `24u` vertical observer offset.

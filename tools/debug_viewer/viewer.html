@@ -49,6 +49,8 @@
         <label>CT GLB <input id="ct-file" type="file" accept=".glb,.gltf"></label>
         <label>T GLB <input id="t-file" type="file" accept=".glb,.gltf"></label>
         <label>BVH8 <input id="bvh-file" type="file" accept=".bvh8"></label>
+        <label>Map OBJ <input id="map-obj-file" type="file" accept=".obj"></label>
+        <div class="hint">OBJ is visual context only. BVH8 is used for blocked/unblocked rays.</div>
     </fieldset>
 
     <fieldset>
@@ -93,6 +95,7 @@
 
     <fieldset>
         <legend>Status</legend>
+        <div class="hint">Blue box: real collision bounds. Yellow box: current inflated target. Orange box: swept sampled target when target velocity is active. Green rays pass, red rays are blocked. CS2FOW hides only when all rays are blocked.</div>
         <div id="status" class="status">loading manifest...</div>
     </fieldset>
 </aside>

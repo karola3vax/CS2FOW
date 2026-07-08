@@ -28,7 +28,7 @@ struct visibility_tuning
 	uint32_t update_interval_ms {1};
 	uint32_t min_lookahead_ms {200};
 	uint32_t max_lookahead_ms {500};
-	float peek_margin_units {96.0f};
+	float peek_margin_units {160.0f};
 };
 
 float visibility_effective_lookahead_seconds(float rtt_seconds, const visibility_tuning &tuning);

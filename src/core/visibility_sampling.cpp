@@ -10,12 +10,38 @@ namespace
 
 constexpr float k_max_prediction_speed = 500.0f;
 constexpr float k_min_prediction_speed = 1.0f;
-constexpr float k_bounds_inflate = 16.0f;
+constexpr float k_bounds_inflate = 12.0f;
 constexpr float k_shoulder_origin_offset = 24.0f;
 constexpr float k_vertical_origin_offset = 24.0f;
 constexpr float k_same_point_epsilon_sq = 1.0e-4f;
 constexpr float k_rtt_lookahead_scale = 2.0f;
 constexpr float k_degrees_to_radians = 0.017453292519943295769f;
+
+float stepped_peek_margin(float speed, float max_margin)
+{
+	max_margin = std::max(0.0f, max_margin);
+	if (speed < 25.0f)
+	{
+		return max_margin * 0.10f;
+	}
+	if (speed < 75.0f)
+	{
+		return max_margin * 0.20f;
+	}
+	if (speed < 150.0f)
+	{
+		return max_margin * 0.40f;
+	}
+	if (speed < 250.0f)
+	{
+		return max_margin * 0.60f;
+	}
+	if (speed < 300.0f)
+	{
+		return max_margin * 0.80f;
+	}
+	return max_margin;
+}
 
 float distance_sq(vec3 a, vec3 b)
 {
@@ -109,7 +135,7 @@ vec3 visibility_prediction_offset(vec3 velocity, float seconds, float peek_margi
 		return {};
 	}
 	const float capped_speed = std::min(speed, k_max_prediction_speed);
-	const float distance = std::max(capped_speed * seconds, std::max(0.0f, peek_margin_units));
+	const float distance = std::max(capped_speed * seconds, stepped_peek_margin(speed, peek_margin_units));
 	const float scale = distance / speed;
 	return {velocity.x * scale, velocity.y * scale, 0.0f};
 }
