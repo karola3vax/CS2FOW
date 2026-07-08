@@ -123,6 +123,16 @@ struct live_player
 
 using visual_entity_group = hidden_entity_group<CEntityHandle, k_max_hidden_player_entities>;
 
+visual_group_key make_current_visual_group_key(const visual_entity_group &group)
+{
+	std::array<uint32_t, k_max_hidden_player_entities> values {};
+	for (size_t index = 0; index < group.count; ++index)
+	{
+		values[index] = static_cast<uint32_t>(group.handles[index].ToInt());
+	}
+	return make_visual_group_key(values, group.count);
+}
+
 struct visibility_result
 {
 	uint64_t sequence {};
@@ -611,8 +621,8 @@ plugin g_plugin;
 
 CConVar<bool> cs2fow_enable("cs2fow_enable", FCVAR_NONE, "Enable CS2FOW when map data is valid", true);
 CConVar<int> cs2fow_update_interval_ms("cs2fow_update_interval_ms", FCVAR_NONE, "Visibility worker update interval", 1, true, 1, true, 250);
-CConVar<int> cs2fow_max_lookahead_ms("cs2fow_max_lookahead_ms", FCVAR_NONE, "Maximum latency lookahead", 250, true, 0, true, 250);
-CConVar<int> cs2fow_min_lookahead_ms("cs2fow_min_lookahead_ms", FCVAR_NONE, "Minimum reveal lookahead", 200, true, 0, true, 250);
+CConVar<int> cs2fow_max_lookahead_ms("cs2fow_max_lookahead_ms", FCVAR_NONE, "Maximum latency lookahead", 500, true, 0, true, 500);
+CConVar<int> cs2fow_min_lookahead_ms("cs2fow_min_lookahead_ms", FCVAR_NONE, "Minimum reveal lookahead", 200, true, 0, true, 500);
 CConVar<int> cs2fow_peek_margin_units("cs2fow_peek_margin_units", FCVAR_NONE, "Minimum moving peek margin in Source units", 64, true, 0, true, 64);
 CConVar<int> cs2fow_visibility_hold_ms("cs2fow_visibility_hold_ms", FCVAR_NONE, "Minimum revealed duration", 250, true, 0, true, 1000);
 CConVar<bool> cs2fow_debug("cs2fow_debug", FCVAR_NONE, "Enable CS2FOW diagnostic logging", false);
@@ -1341,6 +1351,10 @@ void plugin::hook_check_transmit(CCheckTransmitInfo **infos, int count, CBitVec<
 			visual_entity_group current_group;
 			const bool current_group_valid = collect_player_visual_group(system, current_pawn, current_group);
 			const bool full_group_marked = current_group_valid && group_fully_marked(system, info->m_pTransmitEntity, current_group);
+			if (current_group_valid)
+			{
+				update_pair_visual_group(guard, make_current_visual_group_key(current_group), now, k_pair_baseline_warmup);
+			}
 			if (result->visible[slot][target])
 			{
 				if (full_group_marked)

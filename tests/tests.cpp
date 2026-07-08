@@ -14,6 +14,7 @@
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <initializer_list>
 #include <iostream>
 #include <random>
 #include <string>
@@ -194,20 +195,36 @@ float max_x(const std::array<vec3, k_visibility_target_count> &points)
 	return result;
 }
 
+visual_group_key test_visual_key(std::initializer_list<uint32_t> handles)
+{
+	std::array<uint32_t, 8> values {};
+	size_t count = 0;
+	for (uint32_t handle : handles)
+	{
+		assert(count < values.size());
+		values[count++] = handle;
+	}
+	return make_visual_group_key(values, count);
+}
+
 void test_visibility_sampling()
 {
 	const bvh8_data open = test_world({{{10000, 10000, 10000}, {10001, 10000, 10000}, {10000, 10001, 10000}}});
-	const visibility_tuning tuning {1, 200, 250, 64.0f};
+	const visibility_tuning tuning {1, 200, 500, 64.0f};
 	visibility_player player {};
 	player.eye = {0, 0, 0};
 	player.origin = {0, 0, 0};
 	player.mins = {-16, -16, 0};
 	player.maxs = {16, 16, 72};
 
-	assert(std::fabs(visibility_effective_lookahead_seconds(0.0f, tuning) - 0.201f) < 0.001f);
-	assert(std::fabs(visibility_effective_lookahead_seconds(0.03f, tuning) - 0.216f) < 0.001f);
-	assert(std::fabs(visibility_effective_lookahead_seconds(0.08f, tuning) - 0.241f) < 0.001f);
-	assert(std::fabs(visibility_effective_lookahead_seconds(0.1f, tuning) - 0.25f) < 0.001f);
+	assert(std::fabs(visibility_effective_lookahead_seconds(0.0f, tuning) - 0.2f) < 0.001f);
+	assert(std::fabs(visibility_effective_lookahead_seconds(0.025f, tuning) - 0.25f) < 0.001f);
+	assert(std::fabs(visibility_effective_lookahead_seconds(0.05f, tuning) - 0.3f) < 0.001f);
+	assert(std::fabs(visibility_effective_lookahead_seconds(0.075f, tuning) - 0.35f) < 0.001f);
+	assert(std::fabs(visibility_effective_lookahead_seconds(0.1f, tuning) - 0.4f) < 0.001f);
+	assert(std::fabs(visibility_effective_lookahead_seconds(0.125f, tuning) - 0.45f) < 0.001f);
+	assert(std::fabs(visibility_effective_lookahead_seconds(0.15f, tuning) - 0.5f) < 0.001f);
+	assert(std::fabs(visibility_effective_lookahead_seconds(0.2f, tuning) - 0.5f) < 0.001f);
 
 	player.velocity = {100, 0, 0};
 	auto origins = visibility_origins(open, player, tuning, visibility_effective_lookahead_seconds(0.0f, tuning));
@@ -219,7 +236,7 @@ void test_visibility_sampling()
 
 	player.velocity = {1000, 0, 0};
 	origins = visibility_origins(open, player, tuning, visibility_effective_lookahead_seconds(0.0f, tuning));
-	assert(std::fabs(origins[1].x - 100.5f) < 0.01f);
+	assert(std::fabs(origins[1].x - 100.0f) < 0.01f);
 
 	visibility_tuning disabled = tuning;
 	disabled.max_lookahead_ms = 0;
@@ -283,6 +300,17 @@ void test_lifecycle_guard()
 	assert(lifecycle_allows_hiding(guard, start + std::chrono::milliseconds(13500)));
 }
 
+void test_visual_group_key()
+{
+	const visual_group_key left = test_visual_key({30, 10, 20, 10});
+	const visual_group_key right = test_visual_key({20, 30, 10});
+	assert(!visual_group_changed(left, right));
+	assert(left.count == 3);
+
+	assert(visual_group_changed(left, test_visual_key({10, 20})));
+	assert(visual_group_changed(test_visual_key({326u | (1u << 15)}), test_visual_key({326u | (2u << 15)})));
+}
+
 void test_pair_guard()
 {
 	using clock = std::chrono::steady_clock;
@@ -305,6 +333,23 @@ void test_pair_guard()
 	pair_note_open(guard, start + std::chrono::milliseconds(1500), 1);
 	assert(!pair_allows_hiding(guard, start + std::chrono::milliseconds(1501), 1));
 	assert(pair_allows_hiding(guard, start + std::chrono::milliseconds(1501), 2));
+
+	pair_guard visual_guard;
+	const visual_group_key group = test_visual_key({10, 20, 30});
+	const visual_group_key same_group = test_visual_key({30, 20, 10, 10});
+	const visual_group_key changed_group = test_visual_key({10, 20, 31});
+	update_pair_guard(visual_guard, observer, true, target, true, start, warmup);
+	update_pair_visual_group(visual_guard, group, start, warmup);
+	assert(!pair_allows_hiding(visual_guard, start + std::chrono::milliseconds(1499), 1));
+	pair_note_open(visual_guard, start + std::chrono::milliseconds(1500), 1);
+	assert(pair_allows_hiding(visual_guard, start + std::chrono::milliseconds(1500), 2));
+	update_pair_visual_group(visual_guard, same_group, start + std::chrono::milliseconds(1600), warmup);
+	assert(pair_allows_hiding(visual_guard, start + std::chrono::milliseconds(1600), 3));
+	update_pair_visual_group(visual_guard, changed_group, start + std::chrono::milliseconds(1700), warmup);
+	assert(!pair_allows_hiding(visual_guard, start + std::chrono::milliseconds(3199), 4));
+	pair_note_open(visual_guard, start + std::chrono::milliseconds(3200), 4);
+	assert(!pair_allows_hiding(visual_guard, start + std::chrono::milliseconds(3200), 4));
+	assert(pair_allows_hiding(visual_guard, start + std::chrono::milliseconds(3200), 5));
 
 	lifecycle_key changed = target;
 	changed.team = 2;
@@ -354,7 +399,7 @@ void test_hidden_entity_group()
 double benchmark_worker_loop(const bvh8_data &data, const std::string &label)
 {
 	constexpr uint32_t k_players = 32;
-	const visibility_tuning tuning {1, 200, 250, 64.0f};
+	const visibility_tuning tuning {1, 200, 500, 64.0f};
 	std::mt19937 random(0x51f0u);
 	std::uniform_real_distribution<float> x(data.header.world_min[0], data.header.world_max[0]);
 	std::uniform_real_distribution<float> y(data.header.world_min[1], data.header.world_max[1]);
@@ -496,6 +541,7 @@ int main(int argc, char **argv)
 	test_glb(directory);
 	test_visibility_sampling();
 	test_lifecycle_guard();
+	test_visual_group_key();
 	test_pair_guard();
 	test_hidden_entity_group();
 	test_bvh(directory);

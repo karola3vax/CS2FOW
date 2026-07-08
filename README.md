@@ -346,7 +346,7 @@ Defaults live in `cfg/cs2fow.cfg`:
 ```text
 cs2fow_enable 1
 cs2fow_update_interval_ms 1
-cs2fow_max_lookahead_ms 250
+cs2fow_max_lookahead_ms 500
 cs2fow_min_lookahead_ms 200
 cs2fow_peek_margin_units 64
 cs2fow_visibility_hold_ms 250

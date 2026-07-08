@@ -26,7 +26,7 @@ struct visibility_tuning
 {
 	uint32_t update_interval_ms {1};
 	uint32_t min_lookahead_ms {200};
-	uint32_t max_lookahead_ms {250};
+	uint32_t max_lookahead_ms {500};
 	float peek_margin_units {64.0f};
 };
 

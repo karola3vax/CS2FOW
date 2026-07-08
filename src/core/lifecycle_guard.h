@@ -1,5 +1,6 @@
 #pragma once
 
+#include <algorithm>
 #include <array>
 #include <chrono>
 #include <cstddef>
@@ -29,13 +30,23 @@ struct lifecycle_guard
 	bool initialized {};
 };
 
+inline constexpr size_t k_pair_visual_group_key_max = 128;
+
+struct visual_group_key
+{
+	std::array<uint32_t, k_pair_visual_group_key_max> values {};
+	size_t count {};
+};
+
 struct pair_guard
 {
 	lifecycle_key observer_key;
 	lifecycle_key target_key;
+	visual_group_key target_visual_group;
 	std::chrono::steady_clock::time_point fail_open_until {};
 	uint64_t baseline_sequence {};
 	bool baseline_opened {};
+	bool visual_group_initialized {};
 	bool initialized {};
 };
 
@@ -62,6 +73,44 @@ inline bool lifecycle_changed(const lifecycle_key &left, const lifecycle_key &ri
 		|| left.death_info_time != right.death_info_time;
 }
 
+inline bool visual_group_changed(const visual_group_key &left, const visual_group_key &right)
+{
+	if (left.count != right.count)
+	{
+		return true;
+	}
+	for (size_t index = 0; index < left.count; ++index)
+	{
+		if (left.values[index] != right.values[index])
+		{
+			return true;
+		}
+	}
+	return false;
+}
+
+template <size_t max_count>
+inline visual_group_key make_visual_group_key(const std::array<uint32_t, max_count> &values, size_t count)
+{
+	visual_group_key key;
+	key.count = std::min(count, k_pair_visual_group_key_max);
+	for (size_t index = 0; index < key.count; ++index)
+	{
+		key.values[index] = values[index];
+	}
+	std::sort(key.values.begin(), key.values.begin() + key.count);
+	const auto end = std::unique(key.values.begin(), key.values.begin() + key.count);
+	key.count = static_cast<size_t>(end - key.values.begin());
+	return key;
+}
+
+inline void pair_reset_baseline(pair_guard &guard, std::chrono::steady_clock::time_point now, std::chrono::milliseconds warmup)
+{
+	guard.fail_open_until = now + warmup;
+	guard.baseline_sequence = 0;
+	guard.baseline_opened = false;
+}
+
 inline void update_lifecycle_guard(lifecycle_guard &guard, const lifecycle_key &key, bool stable,
 	std::chrono::steady_clock::time_point now, std::chrono::milliseconds grace)
 {
@@ -84,13 +133,24 @@ inline void update_pair_guard(pair_guard &guard, const lifecycle_key &observer_k
 	if (!guard.initialized || lifecycle_changed(guard.observer_key, observer_key)
 		|| lifecycle_changed(guard.target_key, target_key) || !observer_stable || !target_stable)
 	{
-		guard.fail_open_until = now + warmup;
-		guard.baseline_sequence = 0;
-		guard.baseline_opened = false;
+		pair_reset_baseline(guard, now, warmup);
+		guard.target_visual_group = {};
+		guard.visual_group_initialized = false;
 	}
 	guard.observer_key = observer_key;
 	guard.target_key = target_key;
 	guard.initialized = true;
+}
+
+inline void update_pair_visual_group(pair_guard &guard, const visual_group_key &key,
+	std::chrono::steady_clock::time_point now, std::chrono::milliseconds warmup)
+{
+	if (!guard.visual_group_initialized || visual_group_changed(guard.target_visual_group, key))
+	{
+		pair_reset_baseline(guard, now, warmup);
+	}
+	guard.target_visual_group = key;
+	guard.visual_group_initialized = true;
 }
 
 inline void pair_note_open(pair_guard &guard, std::chrono::steady_clock::time_point now, uint64_t sequence)
