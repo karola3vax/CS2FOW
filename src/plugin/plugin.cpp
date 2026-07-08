@@ -92,7 +92,6 @@ struct schema_offsets
 	uint32_t has_death_info {};
 	uint32_t death_info_time {};
 	uint32_t carried_hostage_prop {};
-	uint32_t ragdoll_source {};
 };
 
 struct player_state
@@ -123,11 +122,6 @@ struct live_player
 };
 
 using visual_entity_group = hidden_entity_group<CEntityHandle, k_max_hidden_player_entities>;
-
-struct ragdoll_cache
-{
-	std::array<CEntityHandle, MAX_EDICTS> by_source {};
-};
 
 struct visibility_result
 {
@@ -222,13 +216,6 @@ int resolve_entity_index(CGameEntitySystem *system, CEntityHandle handle)
 		return -1;
 	}
 	return entity_index(system->GetEntityInstance(handle));
-}
-
-bool is_ragdoll_class(const char *name)
-{
-	return name != nullptr && (std::strcmp(name, "prop_ragdoll") == 0
-		|| std::strcmp(name, "physics_prop_ragdoll") == 0
-		|| std::strcmp(name, "prop_ragdoll_attached") == 0);
 }
 
 class visibility_worker
@@ -590,7 +577,6 @@ private:
 	bool collect_player_visual_group(CGameEntitySystem *system, CEntityInstance *pawn, visual_entity_group &group) const;
 	bool group_fully_marked(CGameEntitySystem *system, CBitVec<MAX_EDICTS> *bits, const visual_entity_group &group) const;
 	void clear_group(CGameEntitySystem *system, CBitVec<MAX_EDICTS> *bits, const visual_entity_group &group) const;
-	void refresh_ragdoll_cache(CGameEntitySystem *system);
 	void reset_transmit_state();
 	bool capture(snapshot &value);
 
@@ -616,7 +602,6 @@ private:
 	std::array<lifecycle_guard, k_max_players> lifecycle_;
 	std::array<std::array<pair_guard, k_max_players>, k_max_players> pair_guards_;
 	std::array<std::array<visual_entity_group, k_max_players>, k_max_players> hidden_groups_;
-	ragdoll_cache ragdolls_;
 	std::chrono::steady_clock::time_point last_snapshot_ {};
 	uint64_t snapshot_sequence_ {};
 	bool prerequisites_valid_ {};
@@ -816,7 +801,6 @@ bool plugin::resolve_schema(std::string &error)
 	require(fields_.has_death_info, "CCSPlayerPawn", "m_bHasDeathInfo");
 	require(fields_.death_info_time, "CCSPlayerPawn", "m_flDeathInfoTime");
 	require(fields_.carried_hostage_prop, "CCSPlayer_HostageServices", "m_hCarriedHostageProp");
-	fields_.ragdoll_source = resolve_field(schema_, "CRagdollProp", "m_hRagdollSource");
 	if (!error.empty())
 	{
 		error = "missing schema fields: " + error;
@@ -981,39 +965,6 @@ void plugin::clear_group(CGameEntitySystem *system, CBitVec<MAX_EDICTS> *bits, c
 			bits->Clear(index);
 		}
 	}
-	const int source_index = group.source.GetEntryIndex();
-	if (valid_entity_index(source_index))
-	{
-		const int ragdoll_index = resolve_entity_index(system, ragdolls_.by_source[source_index]);
-		if (valid_entity_index(ragdoll_index))
-		{
-			bits->Clear(ragdoll_index);
-		}
-	}
-}
-
-void plugin::refresh_ragdoll_cache(CGameEntitySystem *system)
-{
-	ragdolls_ = {};
-	if (system == nullptr || fields_.ragdoll_source == 0)
-	{
-		return;
-	}
-	for (CEntityIdentity *identity = system->m_EntityList.m_pFirstActiveEntity; identity != nullptr; identity = identity->m_pNext)
-	{
-		CEntityInstance *entity = identity->m_pInstance;
-		if (entity == nullptr || !is_ragdoll_class(identity->GetClassname()))
-		{
-			continue;
-		}
-		const int ragdoll_index = entity_index(entity);
-		const CEntityHandle source = field<CEntityHandle>(entity, fields_.ragdoll_source);
-		const int source_index = source.GetEntryIndex();
-		if (valid_entity_index(ragdoll_index) && valid_entity_index(source_index) && system->GetEntityInstance(source) != nullptr)
-		{
-			ragdolls_.by_source[source_index] = entity_handle(entity);
-		}
-	}
 }
 
 void plugin::disable(std::string reason)
@@ -1026,10 +977,24 @@ void plugin::disable(std::string reason)
 
 void plugin::reset_transmit_state()
 {
-	lifecycle_ = {};
-	pair_guards_ = {};
-	hidden_groups_ = {};
-	ragdolls_ = {};
+	for (lifecycle_guard &guard : lifecycle_)
+	{
+		guard = {};
+	}
+	for (auto &row : pair_guards_)
+	{
+		for (pair_guard &guard : row)
+		{
+			guard = {};
+		}
+	}
+	for (auto &row : hidden_groups_)
+	{
+		for (visual_entity_group &group : row)
+		{
+			hidden_group_clear(group);
+		}
+	}
 }
 
 bool plugin::resolve_map_source(const std::string &map, map_source &source, std::string &error) const
@@ -1280,7 +1245,6 @@ void plugin::hook_game_frame(bool simulating, bool first_tick, bool last_tick)
 		disable("game entity system is unavailable");
 		return;
 	}
-	refresh_ragdoll_cache(system);
 	const auto now = std::chrono::steady_clock::now();
 	if (now - last_snapshot_ < std::chrono::milliseconds(cs2fow_update_interval_ms.Get()))
 	{
