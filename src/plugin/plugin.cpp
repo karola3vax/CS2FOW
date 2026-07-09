@@ -678,6 +678,10 @@ private:
 	std::array<std::array<visual_entity_group, k_max_players>, k_max_players> hidden_groups_;
 	std::array<slot_transmit_cache, k_max_players> transmit_slot_cache_;
 	std::mutex transmit_state_mutex_;
+	std::atomic<uint64_t> transmit_calls_ {};
+	std::atomic<uint64_t> transmit_stale_skips_ {};
+	std::atomic<uint64_t> transmit_oversized_skips_ {};
+	std::atomic<uint64_t> pair_hides_ {};
 	std::chrono::steady_clock::time_point last_snapshot_ {};
 	uint64_t snapshot_sequence_ {};
 	bool prerequisites_valid_ {};
@@ -1377,8 +1381,13 @@ void plugin::hook_game_frame(bool simulating, bool first_tick, bool last_tick)
 
 void plugin::hook_check_transmit(CCheckTransmitInfo **infos, int count, CBitVec<MAX_EDICTS> &, CBitVec<MAX_EDICTS> &, const Entity2Networkable_t **, const uint16 *, int)
 {
-	if (!cs2fow_enable.Get() || !disabled_reason_.empty() || infos == nullptr || count <= 0 || count > static_cast<int>(k_max_players))
+	if (!cs2fow_enable.Get() || !disabled_reason_.empty() || infos == nullptr || count <= 0)
 	{
+		return;
+	}
+	if (count > static_cast<int>(k_max_players))
+	{
+		++transmit_oversized_skips_;
 		return;
 	}
 	CGameEntitySystem *system = entity_system();
@@ -1391,8 +1400,13 @@ void plugin::hook_check_transmit(CCheckTransmitInfo **infos, int count, CBitVec<
 	const auto now = std::chrono::steady_clock::now();
 	if (!result || now - result->completed > stale_after)
 	{
+		if (result)
+		{
+			++transmit_stale_skips_;
+		}
 		return;
 	}
+	++transmit_calls_;
 	std::lock_guard<std::mutex> lock(transmit_state_mutex_);
 	const auto current_player_pawn = [&](uint32_t slot, const player_state &saved)
 	{
@@ -1513,6 +1527,7 @@ void plugin::hook_check_transmit(CCheckTransmitInfo **infos, int count, CBitVec<
 					masks.values[mask]->Clear(cache.entity_indices[index]);
 				}
 			}
+			++pair_hides_;
 		}
 	}
 }
@@ -1529,6 +1544,9 @@ void plugin::print_status() const
 	META_CONPRINTF("[CS2FOW] worker latest=%.3fms average=%.3fms maximum=%.3fms result_age=%.1fms pairs=%u visible=%u hidden=%u cycles=%llu\n",
 		stats.latest_ms, stats.average_ms, stats.maximum_ms, age_ms, stats.evaluated_pairs, stats.visible_pairs, stats.hidden_pairs,
 		static_cast<unsigned long long>(stats.cycles));
+	META_CONPRINTF("[CS2FOW] transmit calls=%llu stale_skips=%llu oversized_skips=%llu pair_hides=%llu\n",
+		static_cast<unsigned long long>(transmit_calls_.load()), static_cast<unsigned long long>(transmit_stale_skips_.load()),
+		static_cast<unsigned long long>(transmit_oversized_skips_.load()), static_cast<unsigned long long>(pair_hides_.load()));
 	std::string bake_map;
 	double bake_elapsed_ms = 0;
 	if (automatic_baker_.status(bake_map, bake_elapsed_ms))
