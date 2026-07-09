@@ -140,6 +140,15 @@ visual_group_key make_current_visual_group_key(const visual_entity_group &group)
 	return make_visual_group_key(values, group.count);
 }
 
+struct slot_transmit_cache
+{
+	CEntityInstance *pawn {};
+	bool group_valid {};
+	visual_entity_group group;
+	visual_group_key group_key;
+	std::array<int, k_max_hidden_player_entities> entity_indices {};
+};
+
 struct visibility_result
 {
 	uint64_t sequence {};
@@ -639,7 +648,6 @@ private:
 	lifecycle_key player_lifecycle(uint32_t slot, CGameEntitySystem *system, live_player *live) const;
 	weapon_muzzle_class active_weapon_muzzle_class(CGameEntitySystem *system, CEntityInstance *pawn) const;
 	bool collect_player_visual_group(CGameEntitySystem *system, CEntityInstance *pawn, visual_entity_group &group) const;
-	bool group_fully_marked(CGameEntitySystem *system, CBitVec<MAX_EDICTS> *bits, const visual_entity_group &group) const;
 	void clear_group(CGameEntitySystem *system, const transmit_masks<CBitVec<MAX_EDICTS>> &masks, const visual_entity_group &group) const;
 	void reset_transmit_state();
 	bool capture(snapshot &value);
@@ -668,6 +676,7 @@ private:
 	std::array<lifecycle_guard, k_max_players> lifecycle_;
 	std::array<std::array<pair_guard, k_max_players>, k_max_players> pair_guards_;
 	std::array<std::array<visual_entity_group, k_max_players>, k_max_players> hidden_groups_;
+	std::array<slot_transmit_cache, k_max_players> transmit_slot_cache_;
 	std::mutex transmit_state_mutex_;
 	std::chrono::steady_clock::time_point last_snapshot_ {};
 	uint64_t snapshot_sequence_ {};
@@ -1053,19 +1062,6 @@ bool plugin::collect_player_visual_group(CGameEntitySystem *system, CEntityInsta
 	return group.count != 0;
 }
 
-bool plugin::group_fully_marked(CGameEntitySystem *system, CBitVec<MAX_EDICTS> *bits, const visual_entity_group &group) const
-{
-	if (bits == nullptr || group.count == 0)
-	{
-		return false;
-	}
-	return hidden_group_all_of(group, [&](CEntityHandle handle)
-	{
-		const int index = resolve_entity_index(system, handle);
-		return valid_networked_edict_index(index) && bits->IsBitSet(index);
-	});
-}
-
 void plugin::clear_group(CGameEntitySystem *system, const transmit_masks<CBitVec<MAX_EDICTS>> &masks, const visual_entity_group &group) const
 {
 	if (masks.count == 0)
@@ -1409,6 +1405,26 @@ void plugin::hook_check_transmit(CCheckTransmitInfo **infos, int count, CBitVec<
 		}
 		return live.pawn;
 	};
+	for (uint32_t slot = 0; slot < k_max_players; ++slot)
+	{
+		slot_transmit_cache &cache = transmit_slot_cache_[slot];
+		cache.group_valid = false;
+		cache.pawn = current_player_pawn(slot, result->players[slot]);
+		if (cache.pawn == nullptr)
+		{
+			continue;
+		}
+		cache.group_valid = collect_player_visual_group(system, cache.pawn, cache.group);
+		if (!cache.group_valid)
+		{
+			continue;
+		}
+		cache.group_key = make_current_visual_group_key(cache.group);
+		for (size_t index = 0; index < cache.group.count; ++index)
+		{
+			cache.entity_indices[index] = resolve_entity_index(system, cache.group.handles[index]);
+		}
+	}
 	for (int i = 0; i < count; ++i)
 	{
 		CCheckTransmitInfo *info = infos[i];
@@ -1432,7 +1448,7 @@ void plugin::hook_check_transmit(CCheckTransmitInfo **infos, int count, CBitVec<
 			continue;
 		}
 		const player_state &observer = result->players[slot];
-		if (current_player_pawn(static_cast<uint32_t>(slot), observer) == nullptr)
+		if (transmit_slot_cache_[slot].pawn == nullptr)
 		{
 			continue;
 		}
@@ -1444,16 +1460,8 @@ void plugin::hook_check_transmit(CCheckTransmitInfo **infos, int count, CBitVec<
 			{
 				hidden_group_clear(stored_group);
 			}
-			if (!player.valid || player.team == observer.team)
-			{
-				if (hidden_group_quarantined(stored_group, now))
-				{
-					clear_group(system, masks, stored_group);
-				}
-				continue;
-			}
-			CEntityInstance *current_pawn = current_player_pawn(target, player);
-			if (current_pawn == nullptr)
+			const slot_transmit_cache &cache = transmit_slot_cache_[target];
+			if (!player.valid || player.team == observer.team || cache.pawn == nullptr)
 			{
 				if (hidden_group_quarantined(stored_group, now))
 				{
@@ -1462,12 +1470,14 @@ void plugin::hook_check_transmit(CCheckTransmitInfo **infos, int count, CBitVec<
 				continue;
 			}
 			pair_guard &guard = pair_guards_[slot][target];
-			visual_entity_group current_group;
-			const bool current_group_valid = collect_player_visual_group(system, current_pawn, current_group);
-			const bool full_group_marked = current_group_valid && group_fully_marked(system, masks.primary, current_group);
-			if (current_group_valid)
+			bool full_group_marked = cache.group_valid;
+			for (size_t index = 0; full_group_marked && index < cache.group.count; ++index)
 			{
-				update_pair_visual_group(guard, make_current_visual_group_key(current_group), now, k_pair_baseline_warmup);
+				full_group_marked = masks.primary->IsBitSet(cache.entity_indices[index]);
+			}
+			if (cache.group_valid)
+			{
+				update_pair_visual_group(guard, cache.group_key, now, k_pair_baseline_warmup);
 			}
 			if (result->visible[slot][target])
 			{
@@ -1487,7 +1497,7 @@ void plugin::hook_check_transmit(CCheckTransmitInfo **infos, int count, CBitVec<
 				}
 				continue;
 			}
-			if (!current_group_valid)
+			if (!cache.group_valid)
 			{
 				if (hidden_group_quarantined(stored_group, now))
 				{
@@ -1495,8 +1505,14 @@ void plugin::hook_check_transmit(CCheckTransmitInfo **infos, int count, CBitVec<
 				}
 				continue;
 			}
-			hidden_group_store(stored_group, current_group.source, current_group.handles, current_group.count, now, k_hidden_entity_quarantine);
-			clear_group(system, masks, current_group);
+			hidden_group_store(stored_group, cache.group.source, cache.group.handles, cache.group.count, now, k_hidden_entity_quarantine);
+			for (size_t index = 0; index < cache.group.count; ++index)
+			{
+				for (size_t mask = 0; mask < masks.count; ++mask)
+				{
+					masks.values[mask]->Clear(cache.entity_indices[index]);
+				}
+			}
 		}
 	}
 }
