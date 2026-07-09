@@ -185,29 +185,6 @@ type &field(void *object, uint32_t offset)
 	return *reinterpret_cast<type *>(reinterpret_cast<uintptr_t>(object) + offset);
 }
 
-uint32_t find_field_recursive(SchemaClassInfoData_t *class_info, const char *name)
-{
-	if (class_info == nullptr)
-	{
-		return 0;
-	}
-	for (int i = 0; i < class_info->m_nFieldCount; ++i)
-	{
-		if (std::strcmp(class_info->m_pFields[i].m_pszName, name) == 0)
-		{
-			return class_info->m_pFields[i].m_nSingleInheritanceOffset;
-		}
-	}
-	for (int i = 0; i < class_info->m_nBaseClassCount; ++i)
-	{
-		if (const uint32_t offset = find_field_recursive(class_info->m_pBaseClasses[i].m_pClass, name); offset != 0)
-		{
-			return offset;
-		}
-	}
-	return 0;
-}
-
 bool find_field_recursive(SchemaClassInfoData_t *class_info, const char *name, uint32_t &offset)
 {
 	if (class_info == nullptr)
@@ -230,20 +207,6 @@ bool find_field_recursive(SchemaClassInfoData_t *class_info, const char *name, u
 		}
 	}
 	return false;
-}
-
-uint32_t resolve_field(ISchemaSystem *schema, const char *class_name, const char *field_name)
-{
-#if defined(_WIN32)
-	CSchemaSystemTypeScope *scope = schema->FindTypeScopeForModule("server.dll");
-#else
-	CSchemaSystemTypeScope *scope = schema->FindTypeScopeForModule("libserver.so");
-#endif
-	if (scope == nullptr)
-	{
-		return 0;
-	}
-	return find_field_recursive(scope->FindDeclaredClass(class_name).Get(), field_name);
 }
 
 bool resolve_field(ISchemaSystem *schema, const char *class_name, const char *field_name, uint32_t &offset)
@@ -855,8 +818,7 @@ bool plugin::resolve_schema(std::string &error)
 {
 	auto require = [&](uint32_t &target, const char *class_name, const char *field_name)
 	{
-		target = resolve_field(schema_, class_name, field_name);
-		if (target == 0)
+		if (!resolve_field(schema_, class_name, field_name, target))
 		{
 			if (!error.empty())
 			{
