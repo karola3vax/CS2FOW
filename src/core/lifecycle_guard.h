@@ -216,4 +216,51 @@ inline bool hidden_group_all_of(const hidden_entity_group<handle_type, max_count
 	return true;
 }
 
+template <typename handle_type, size_t max_count>
+inline bool hidden_group_contains(const hidden_entity_group<handle_type, max_count> &group, const handle_type &handle, size_t count)
+{
+	const size_t bounded = std::min(count, group.count);
+	for (size_t index = 0; index < bounded; ++index)
+	{
+		if (group.handles[index] == handle)
+		{
+			return true;
+		}
+	}
+	return false;
+}
+
+template <typename handle_type>
+struct owner_effect_link
+{
+	handle_type child {};
+	handle_type owner {};
+	handle_type effect {};
+};
+
+template <typename handle_type, size_t max_count, typename link_type, typename predicate_type>
+inline bool hidden_group_append_owner_effect_links(hidden_entity_group<handle_type, max_count> &group,
+	const link_type *links, size_t count, predicate_type usable_child)
+{
+	const size_t base_count = group.count;
+	for (size_t index = 0; index < count; ++index)
+	{
+		const link_type &link = links[index];
+		if (!usable_child(link.child) || hidden_group_contains(group, link.child, group.count))
+		{
+			continue;
+		}
+		if (!hidden_group_contains(group, link.owner, base_count) && !hidden_group_contains(group, link.effect, base_count))
+		{
+			continue;
+		}
+		if (group.count >= group.handles.size())
+		{
+			return false;
+		}
+		group.handles[group.count++] = link.child;
+	}
+	return true;
+}
+
 } // namespace cs2fow

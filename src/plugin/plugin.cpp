@@ -24,6 +24,7 @@
 #include <chrono>
 #include <cmath>
 #include <condition_variable>
+#include <cstdio>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
@@ -47,7 +48,12 @@ namespace cs2fow
 constexpr uint32_t k_max_players = 64;
 constexpr uint32_t k_max_weapons = 64;
 constexpr uint32_t k_max_wearables = 32;
-constexpr uint32_t k_max_hidden_player_entities = 1 + 2 + k_max_weapons + k_max_wearables + 1;
+constexpr uint32_t k_max_aux_visual_group_entities = 32;
+constexpr uint32_t k_max_aux_visual_cache_entities = 2048;
+constexpr uint32_t k_max_recent_hide_records = 256;
+constexpr uint32_t k_entity_scan_hard_limit = MAX_TOTAL_ENTITIES;
+constexpr uint32_t k_max_entity_name = 64;
+constexpr uint32_t k_max_hidden_player_entities = 1 + 2 + k_max_weapons + k_max_wearables + 1 + k_max_aux_visual_group_entities;
 constexpr uint32_t k_max_gamedata_offset = 4096;
 constexpr uint8_t k_life_alive = 0;
 constexpr uint8_t k_team_t = 2;
@@ -97,6 +103,8 @@ struct schema_offsets
 	uint32_t has_death_info {};
 	uint32_t death_info_time {};
 	uint32_t carried_hostage_prop {};
+	uint32_t owner_entity {};
+	uint32_t effect_entity {};
 };
 
 struct player_state
@@ -129,6 +137,29 @@ struct live_player
 };
 
 using visual_entity_group = hidden_entity_group<CEntityHandle, k_max_hidden_player_entities>;
+
+enum class hide_reason : uint8_t
+{
+	current,
+	quarantine
+};
+
+struct aux_visual_entity : owner_effect_link<CEntityHandle>
+{
+	int edict {-1};
+	char name[k_max_entity_name] {};
+};
+
+struct recent_hide_record
+{
+	int edict {-1};
+	CEntityHandle handle;
+	CEntityHandle source;
+	int recipient_slot {-1};
+	hide_reason reason {hide_reason::current};
+	std::chrono::steady_clock::time_point when;
+	char name[k_max_entity_name] {};
+};
 
 visual_group_key make_current_visual_group_key(const visual_entity_group &group)
 {
@@ -264,6 +295,21 @@ int entity_index(CEntityInstance *entity)
 CEntityHandle entity_handle(CEntityInstance *entity)
 {
 	return entity != nullptr && entity->m_pEntity != nullptr ? entity->m_pEntity->GetRefEHandle() : CEntityHandle {};
+}
+
+void copy_entity_name(CEntityInstance *entity, char (&name)[k_max_entity_name])
+{
+	const char *source = entity != nullptr && entity->m_pEntity != nullptr ? entity->m_pEntity->GetClassname() : nullptr;
+	if (source == nullptr || source[0] == '\0')
+	{
+		source = "<unknown>";
+	}
+	std::snprintf(name, sizeof(name), "%s", source);
+}
+
+const char *hide_reason_name(hide_reason reason)
+{
+	return reason == hide_reason::quarantine ? "quarantine" : "current";
 }
 
 bool valid_networked_edict_index(int index)
@@ -613,6 +659,7 @@ public:
 	void hook_game_frame(bool simulating, bool first_tick, bool last_tick);
 	void hook_check_transmit(CCheckTransmitInfo **infos, int count, CBitVec<MAX_EDICTS> &, CBitVec<MAX_EDICTS> &, const Entity2Networkable_t **, const uint16 *, int);
 	void print_status() const;
+	void print_entity(int edict);
 
 	const char *GetAuthor() override { return "karola3vax"; }
 	const char *GetName() override { return "CS2FOW"; }
@@ -638,9 +685,13 @@ private:
 	CEntityInstance *pawn(CEntityInstance *controller) const;
 	lifecycle_key player_lifecycle(uint32_t slot, CGameEntitySystem *system, live_player *live) const;
 	weapon_muzzle_class active_weapon_muzzle_class(CGameEntitySystem *system, CEntityInstance *pawn) const;
+	void refresh_aux_visual_cache(CGameEntitySystem *system);
 	bool collect_player_visual_group(CGameEntitySystem *system, CEntityInstance *pawn, visual_entity_group &group) const;
 	bool group_fully_marked(CGameEntitySystem *system, CBitVec<MAX_EDICTS> *bits, const visual_entity_group &group) const;
-	void clear_group(CGameEntitySystem *system, const transmit_masks<CBitVec<MAX_EDICTS>> &masks, const visual_entity_group &group) const;
+	void clear_group(CGameEntitySystem *system, const transmit_masks<CBitVec<MAX_EDICTS>> &masks, const visual_entity_group &group,
+		int recipient_slot, hide_reason reason, std::chrono::steady_clock::time_point now);
+	void record_hidden_entity(CGameEntitySystem *system, CEntityHandle handle, int edict, const visual_entity_group &group,
+		int recipient_slot, hide_reason reason, std::chrono::steady_clock::time_point now);
 	void reset_transmit_state();
 	bool capture(snapshot &value);
 
@@ -665,6 +716,11 @@ private:
 	visibility_worker worker_;
 	automatic_baker automatic_baker_;
 	bool weapon_item_schema_available_ {};
+	bool owner_effect_schema_available_ {};
+	std::array<aux_visual_entity, k_max_aux_visual_cache_entities> aux_visual_entities_;
+	size_t aux_visual_count_ {};
+	std::array<recent_hide_record, k_max_recent_hide_records> recent_hides_;
+	size_t recent_hide_next_ {};
 	std::array<lifecycle_guard, k_max_players> lifecycle_;
 	std::array<std::array<pair_guard, k_max_players>, k_max_players> pair_guards_;
 	std::array<std::array<visual_entity_group, k_max_players>, k_max_players> hidden_groups_;
@@ -687,6 +743,24 @@ CConVar<bool> cs2fow_debug("cs2fow_debug", FCVAR_NONE, "Enable CS2FOW diagnostic
 CON_COMMAND_F(cs2fow_status, "Report CS2FOW state", FCVAR_NONE)
 {
 	g_plugin.print_status();
+}
+
+CON_COMMAND_F(cs2fow_entity, "Look up recently hidden CS2FOW entity by edict index", FCVAR_NONE)
+{
+	if (args.ArgC() != 2)
+	{
+		META_CONPRINTF("[CS2FOW] usage: cs2fow_entity <edict>\n");
+		return;
+	}
+	const char *text = args.Arg(1);
+	int edict = -1;
+	const auto result = std::from_chars(text, text + std::strlen(text), edict);
+	if (result.ec != std::errc {} || *result.ptr != '\0')
+	{
+		META_CONPRINTF("[CS2FOW] invalid edict: %s\n", text);
+		return;
+	}
+	g_plugin.print_entity(edict);
 }
 
 SH_DECL_HOOK3_void(IServerGameDLL, GameFrame, SH_NOATTRIB, false, bool, bool, bool);
@@ -892,12 +966,16 @@ bool plugin::resolve_schema(std::string &error)
 	require(fields_.has_death_info, "CCSPlayerPawn", "m_bHasDeathInfo");
 	require(fields_.death_info_time, "CCSPlayerPawn", "m_flDeathInfoTime");
 	require(fields_.carried_hostage_prop, "CCSPlayer_HostageServices", "m_hCarriedHostageProp");
+	const bool owner_effect_schema_available =
+		optional(fields_.owner_entity, "CBaseEntity", "m_hOwnerEntity")
+		&& optional(fields_.effect_entity, "CBaseEntity", "m_hEffectEntity");
 	if (!error.empty())
 	{
 		error = "missing schema fields: " + error;
 		return false;
 	}
 	weapon_item_schema_available_ = weapon_item_schema_available;
+	owner_effect_schema_available_ = owner_effect_schema_available;
 	return true;
 }
 
@@ -991,6 +1069,42 @@ weapon_muzzle_class plugin::active_weapon_muzzle_class(CGameEntitySystem *system
 	return weapon_muzzle_class_from_item_definition(definition);
 }
 
+void plugin::refresh_aux_visual_cache(CGameEntitySystem *system)
+{
+	aux_visual_count_ = 0;
+	if (system == nullptr || !owner_effect_schema_available_)
+	{
+		return;
+	}
+	CEntityIdentity *identity = system->m_EntityList.m_pFirstActiveEntity;
+	for (uint32_t scanned = 0; identity != nullptr && scanned < k_entity_scan_hard_limit; identity = identity->m_pNext, ++scanned)
+	{
+		CEntityInstance *entity = identity->m_pInstance;
+		const int edict = entity_index(entity);
+		if (!valid_networked_edict_index(edict))
+		{
+			continue;
+		}
+		const CEntityHandle child = entity_handle(entity);
+		const CEntityHandle owner = field<CEntityHandle>(entity, fields_.owner_entity);
+		const CEntityHandle effect = field<CEntityHandle>(entity, fields_.effect_entity);
+		if (!child.IsValid() || (!owner.IsValid() && !effect.IsValid()))
+		{
+			continue;
+		}
+		if (aux_visual_count_ >= aux_visual_entities_.size())
+		{
+			break;
+		}
+		aux_visual_entity &record = aux_visual_entities_[aux_visual_count_++];
+		record.child = child;
+		record.owner = owner;
+		record.effect = effect;
+		record.edict = edict;
+		copy_entity_name(entity, record.name);
+	}
+}
+
 bool plugin::collect_player_visual_group(CGameEntitySystem *system, CEntityInstance *pawn_entity, visual_entity_group &group) const
 {
 	hidden_group_clear(group);
@@ -1050,6 +1164,14 @@ bool plugin::collect_player_visual_group(CGameEntitySystem *system, CEntityInsta
 		hidden_group_clear(group);
 		return false;
 	}
+	if (!hidden_group_append_owner_effect_links(group, aux_visual_entities_.data(), aux_visual_count_, [&](CEntityHandle handle)
+	{
+		return valid_networked_edict_index(resolve_entity_index(system, handle));
+	}))
+	{
+		hidden_group_clear(group);
+		return false;
+	}
 	return group.count != 0;
 }
 
@@ -1066,15 +1188,49 @@ bool plugin::group_fully_marked(CGameEntitySystem *system, CBitVec<MAX_EDICTS> *
 	});
 }
 
-void plugin::clear_group(CGameEntitySystem *system, const transmit_masks<CBitVec<MAX_EDICTS>> &masks, const visual_entity_group &group) const
+void plugin::record_hidden_entity(CGameEntitySystem *system, CEntityHandle handle, int edict,
+	const visual_entity_group &group, int recipient_slot, hide_reason reason, std::chrono::steady_clock::time_point now)
+{
+	recent_hide_record &record = recent_hides_[recent_hide_next_++ % recent_hides_.size()];
+	record.edict = edict;
+	record.handle = handle;
+	record.source = group.source;
+	record.recipient_slot = recipient_slot;
+	record.reason = reason;
+	record.when = now;
+	record.name[0] = '\0';
+	for (size_t index = 0; index < aux_visual_count_; ++index)
+	{
+		if (aux_visual_entities_[index].child == handle)
+		{
+			std::snprintf(record.name, sizeof(record.name), "%s", aux_visual_entities_[index].name);
+			return;
+		}
+	}
+	copy_entity_name(system == nullptr ? nullptr : system->GetEntityInstance(handle), record.name);
+}
+
+void plugin::clear_group(CGameEntitySystem *system, const transmit_masks<CBitVec<MAX_EDICTS>> &masks,
+	const visual_entity_group &group, int recipient_slot, hide_reason reason, std::chrono::steady_clock::time_point now)
 {
 	if (masks.count == 0)
 	{
 		return;
 	}
-	clear_transmit_group(masks, group.handles, group.count,
-		[&](CEntityHandle handle) { return resolve_entity_index(system, handle); },
-		[](int index) { return valid_networked_edict_index(index); });
+	for (size_t entity = 0; entity < group.count; ++entity)
+	{
+		const CEntityHandle handle = group.handles[entity];
+		const int index = resolve_entity_index(system, handle);
+		if (!valid_networked_edict_index(index))
+		{
+			continue;
+		}
+		for (size_t mask = 0; mask < masks.count; ++mask)
+		{
+			masks.values[mask]->Clear(index);
+		}
+		record_hidden_entity(system, handle, index, group, recipient_slot, reason, now);
+	}
 }
 
 void plugin::disable(std::string reason)
@@ -1105,6 +1261,16 @@ void plugin::reset_transmit_state()
 		{
 			hidden_group_clear(group);
 		}
+	}
+	aux_visual_count_ = 0;
+	for (aux_visual_entity &entity : aux_visual_entities_)
+	{
+		entity = {};
+	}
+	recent_hide_next_ = 0;
+	for (recent_hide_record &record : recent_hides_)
+	{
+		record = {};
 	}
 }
 
@@ -1288,6 +1454,7 @@ bool plugin::capture(snapshot &value)
 	std::array<lifecycle_key, k_max_players> keys;
 	std::array<bool, k_max_players> stable_slots {};
 	std::lock_guard<std::mutex> lock(transmit_state_mutex_);
+	refresh_aux_visual_cache(system);
 	for (uint32_t slot = 0; slot < k_max_players; ++slot)
 	{
 		live_player live;
@@ -1448,7 +1615,7 @@ void plugin::hook_check_transmit(CCheckTransmitInfo **infos, int count, CBitVec<
 			{
 				if (hidden_group_quarantined(stored_group, now))
 				{
-					clear_group(system, masks, stored_group);
+					clear_group(system, masks, stored_group, slot, hide_reason::quarantine, now);
 				}
 				continue;
 			}
@@ -1457,7 +1624,7 @@ void plugin::hook_check_transmit(CCheckTransmitInfo **infos, int count, CBitVec<
 			{
 				if (hidden_group_quarantined(stored_group, now))
 				{
-					clear_group(system, masks, stored_group);
+					clear_group(system, masks, stored_group, slot, hide_reason::quarantine, now);
 				}
 				continue;
 			}
@@ -1491,12 +1658,12 @@ void plugin::hook_check_transmit(CCheckTransmitInfo **infos, int count, CBitVec<
 			{
 				if (hidden_group_quarantined(stored_group, now))
 				{
-					clear_group(system, masks, stored_group);
+					clear_group(system, masks, stored_group, slot, hide_reason::quarantine, now);
 				}
 				continue;
 			}
 			hidden_group_store(stored_group, current_group.source, current_group.handles, current_group.count, now, k_hidden_entity_quarantine);
-			clear_group(system, masks, current_group);
+			clear_group(system, masks, current_group, slot, hide_reason::current, now);
 		}
 	}
 }
@@ -1518,6 +1685,34 @@ void plugin::print_status() const
 	if (automatic_baker_.status(bake_map, bake_elapsed_ms))
 	{
 		META_CONPRINTF("[CS2FOW] auto-bake map=%s elapsed=%.1fms\n", bake_map.c_str(), bake_elapsed_ms);
+	}
+}
+
+void plugin::print_entity(int edict)
+{
+	if (!valid_networked_edict_index(edict))
+	{
+		META_CONPRINTF("[CS2FOW] invalid edict index: %d\n", edict);
+		return;
+	}
+	const auto now = std::chrono::steady_clock::now();
+	std::lock_guard<std::mutex> lock(transmit_state_mutex_);
+	int matches = 0;
+	for (const recent_hide_record &record : recent_hides_)
+	{
+		if (record.edict != edict || record.when == std::chrono::steady_clock::time_point {})
+		{
+			continue;
+		}
+		const double age_ms = std::chrono::duration<double, std::milli>(now - record.when).count();
+		META_CONPRINTF("[CS2FOW] entity %d age=%.0fms recipient=%d reason=%s handle=0x%x source=0x%x class=%s\n",
+			record.edict, age_ms, record.recipient_slot, hide_reason_name(record.reason),
+			static_cast<unsigned>(record.handle.ToInt()), static_cast<unsigned>(record.source.ToInt()), record.name);
+		++matches;
+	}
+	if (matches == 0)
+	{
+		META_CONPRINTF("[CS2FOW] no recent hidden record for edict %d\n", edict);
 	}
 }
 

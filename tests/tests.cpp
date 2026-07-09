@@ -594,6 +594,32 @@ void test_hidden_entity_group()
 	assert(!hidden_group_all_of(group, [&](uint32_t handle) { return marked[handle]; }));
 	marked[12] = true;
 	assert(hidden_group_all_of(group, [&](uint32_t handle) { return marked[handle]; }));
+
+	hidden_group_clear(group);
+	group.handles[0] = 10;
+	group.handles[1] = 20;
+	group.count = 2;
+	const std::array<owner_effect_link<uint32_t>, 4> links {{
+		{30, 10, 0},
+		{31, 0, 20},
+		{32, 99, 98},
+		{20, 10, 0}
+	}};
+	assert(hidden_group_append_owner_effect_links(group, links.data(), links.size(), [](uint32_t child) { return child != 0; }));
+	assert(group.count == 4);
+	assert(hidden_group_contains(group, 30u, group.count));
+	assert(hidden_group_contains(group, 31u, group.count));
+	assert(!hidden_group_contains(group, 32u, group.count));
+
+	const std::array<owner_effect_link<uint32_t>, 1> overflow {{{33, 10, 0}}};
+	assert(!hidden_group_append_owner_effect_links(group, overflow.data(), overflow.size(), [](uint32_t) { return true; }));
+
+	hidden_group_clear(group);
+	group.handles[0] = 10;
+	group.count = 1;
+	const std::array<owner_effect_link<uint32_t>, 1> unusable {{{30, 10, 0}}};
+	assert(hidden_group_append_owner_effect_links(group, unusable.data(), unusable.size(), [](uint32_t) { return false; }));
+	assert(group.count == 1);
 }
 
 double benchmark_worker_loop(const bvh8_data &data, const std::string &label)
