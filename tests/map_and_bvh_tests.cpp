@@ -12,6 +12,7 @@
 #include <cmath>
 #include <cstring>
 #include <fstream>
+#include <limits>
 #include <random>
 #include <thread>
 #include <vector>
@@ -205,12 +206,36 @@ void test_bvh(const std::filesystem::path &directory)
 	assert(write_bvh8(path, data, error));
 	bvh8_data loaded;
 	assert(load_bvh8(path, loaded, error));
+	assert(loaded.header.version == 3 && loaded.header.bake_recipe_version == 1);
 	assert(loaded.header.triangle_count == triangles.size());
 	loaded.header.flags = k_bvh8_flag_nested_map_vpk;
 	assert(validate_bvh8(loaded, error));
 	loaded.header.flags = 0x80000000u;
 	assert(!validate_bvh8(loaded, error));
 	loaded.header.flags = 0;
+
+	const auto rejected_header = [&](const auto &change)
+	{
+		assert(write_bvh8(path, data, error));
+		std::fstream stream(path, std::ios::binary | std::ios::in | std::ios::out);
+		bvh8_header header {};
+		stream.read(reinterpret_cast<char *>(&header), sizeof(header));
+		change(header);
+		stream.seekp(0);
+		stream.write(reinterpret_cast<const char *>(&header), sizeof(header));
+		stream.close();
+		assert(!load_bvh8(path, loaded, error));
+	};
+	rejected_header([](bvh8_header &header) { header.version = 2; });
+	rejected_header([](bvh8_header &header) { header.bake_recipe_version = 2; });
+	rejected_header([](bvh8_header &header) { header.reserved[0] = 1; });
+	rejected_header([](bvh8_header &header) { header.node_count = std::numeric_limits<uint32_t>::max(); });
+	rejected_header([](bvh8_header &header) { header.world_min[0] = std::numeric_limits<float>::quiet_NaN(); });
+	assert(write_bvh8(path, data, error));
+	bvh8_data invalid = data;
+	invalid.header.flags = 0x80000000u;
+	assert(!write_bvh8(path, invalid, error));
+	assert(load_bvh8(path, loaded, error));
 
 	std::mt19937 random(0x2f0f8u);
 	std::uniform_real_distribution<float> coordinate(-8.0f, 8.0f);

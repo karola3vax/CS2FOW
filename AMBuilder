@@ -33,6 +33,7 @@ def configure(compiler, plugin=False):
 
 geometry = [
   os.path.join(root, 'src', 'core', 'bvh8.cpp'),
+  os.path.join(root, 'src', 'core', 'bvh8_format.cpp'),
   os.path.join(root, 'src', 'core', 'builder.cpp'),
 ]
 
@@ -80,6 +81,7 @@ plugin.compiler.defines += ['META_IS_SOURCE2', 'CS2FOW_VERSION="{}"'.format(vers
 config.SdkHelpers.configureCxx(builder, plugin, sdk)
 plugin.sources += [
   os.path.join(root, 'src', 'core', 'bvh8.cpp'),
+  os.path.join(root, 'src', 'core', 'bvh8_format.cpp'),
   os.path.join(root, 'src', 'core', 'map_source.cpp'),
   os.path.join(root, 'src', 'core', 'subprocess.cpp'),
   os.path.join(root, 'src', 'core', 'visibility_sampling.cpp'),
