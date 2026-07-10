@@ -138,6 +138,7 @@ struct live_player
 };
 
 using visual_entity_group = hidden_entity_group<CEntityHandle, k_max_hidden_player_entities>;
+static_assert(k_max_hidden_player_entities <= k_pair_visual_group_key_max);
 
 struct target_transmit_cache
 {

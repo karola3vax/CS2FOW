@@ -429,6 +429,16 @@ void test_visual_group_key()
 
 	assert(visual_group_changed(left, test_visual_key({10, 20})));
 	assert(visual_group_changed(test_visual_key({326u | (1u << 15)}), test_visual_key({326u | (2u << 15)})));
+
+	std::array<uint32_t, k_pair_visual_group_key_max> full {};
+	for (size_t index = 0; index < full.size(); ++index)
+	{
+		full[index] = static_cast<uint32_t>(index + 1);
+	}
+	const visual_group_key full_key = make_visual_group_key(full, full.size());
+	full.back() += 1000;
+	assert(full_key.count == k_pair_visual_group_key_max);
+	assert(visual_group_changed(full_key, make_visual_group_key(full, full.size())));
 }
 
 void test_pair_guard()
