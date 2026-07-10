@@ -15,13 +15,13 @@ It does not load maps, BVH8 files, rays, hit triangles, or runtime worker state.
 ## Export Local Assets
 
 ```powershell
-python tools/debug_viewer/export_assets.py --game "C:\Program Files (x86)\Steam\steamapps\common\Counter-Strike Global Offensive\game\csgo"
+python tools/visibility_point_editor/export_assets.py --game "C:\Program Files (x86)\Steam\steamapps\common\Counter-Strike Global Offensive\game\csgo"
 ```
 
 This writes ignored files under:
 
 ```text
-tools/debug_viewer/local_assets/
+tools/visibility_point_editor/local_assets/
 ```
 
 The weapon preview and muzzle point are only for tuning and visual context. Use the Weapon Preview panel to choose a weapon and adjust its local position, rotation, and scale.
@@ -29,7 +29,7 @@ The weapon preview and muzzle point are only for tuning and visual context. Use 
 ## Run
 
 ```powershell
-cd tools/debug_viewer
+cd tools/visibility_point_editor
 python -m http.server 8765
 ```
 

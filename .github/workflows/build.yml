@@ -64,6 +64,11 @@ jobs:
       - name: Test
         run: .\build\cs2fow_tests\windows-x86_64\cs2fow_tests.exe
 
+      - name: Check visibility point editor
+        run: |
+          python tools/visibility_point_editor/check_points.py
+          node --check tools/visibility_point_editor/viewer.js
+
       - name: Package
         run: python package.py windows-x86_64
 

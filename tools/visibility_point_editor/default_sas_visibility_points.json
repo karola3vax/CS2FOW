@@ -2,6 +2,7 @@
 	"version": 1,
 	"coordinate_space": "source_local",
 	"model": "ctm_sas",
+	"point_count": 15,
 	"points": [
 		{
 			"name": "head",

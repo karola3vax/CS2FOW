@@ -6,6 +6,7 @@
 !/data/maps/.gitkeep
 /tools/vrf/win64/
 /tools/vrf/linux64/
+/tools/visibility_point_editor/local_assets/
 /tools/debug_viewer/local_assets/
 *.tmp
 *.zip

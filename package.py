@@ -4,7 +4,7 @@ import hashlib
 import shutil
 import sys
 import zipfile
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 
 ROOT = Path(__file__).resolve().parent
@@ -51,6 +51,24 @@ def make_zip(directory: Path, modes: dict[str, int] | None = None) -> Path:
   return archive
 
 
+def verify_zip(archive: Path, required: set[str], executables: set[str] | None = None) -> None:
+  with zipfile.ZipFile(archive, "r") as package:
+    names = [info.filename for info in package.infolist()]
+    if len(names) != len(set(names)) or package.testzip() is not None:
+      raise RuntimeError(f"invalid or duplicate zip entries in {archive.name}")
+    for name in names:
+      path = PurePosixPath(name)
+      if path.is_absolute() or ".." in path.parts or "\\" in name:
+        raise RuntimeError(f"unsafe zip entry in {archive.name}: {name}")
+    missing = required - set(names)
+    if missing:
+      raise RuntimeError(f"missing entries in {archive.name}: {', '.join(sorted(missing))}")
+    for name in executables or set():
+      mode = package.getinfo(name).external_attr >> 16
+      if mode & 0o111 == 0:
+        raise RuntimeError(f"Linux executable bit missing in {archive.name}: {name}")
+
+
 def package_root(name: str) -> Path:
   path = PACKAGES / name
   if path.exists():
@@ -92,7 +110,16 @@ def build_core_package(platform: str, plugin_name: str, baker_name: str, vrf_dir
       "tools/cs2fow_baker": 0o755,
       "tools/vrf/linux64/Source2Viewer-CLI": 0o755,
     }
-  return make_zip(out, modes)
+  archive = make_zip(out, modes)
+  required = {
+    "addons/cs2fow/bin/" + Path(plugin_name).name,
+    "addons/cs2fow/gamedata/cs2fow.games.txt",
+    "addons/metamod/cs2fow.vdf",
+    "cfg/cs2fow.cfg",
+    "tools/" + Path(baker_name).name,
+  }
+  verify_zip(archive, required, set(modes))
+  return archive
 
 
 def build_official_maps_package() -> Path | None:
@@ -100,12 +127,16 @@ def build_official_maps_package() -> Path | None:
   maps = [path for path in maps if path.suffix in {".bvh8", ".json"}]
   if not maps:
     return None
+  if {path.stem for path in maps if path.suffix == ".bvh8"} != {path.stem for path in maps if path.suffix == ".json"}:
+    raise RuntimeError("official map bakes and reports do not match")
 
   out = package_root(f"cs2fow-{VERSION}-official-maps")
   copy_file(ROOT / "DATA_NOTICE", out / "DATA_NOTICE")
   for path in maps:
     copy_file(path, out / "addons" / "cs2fow" / "data" / "maps" / path.name)
-  return make_zip(out)
+  archive = make_zip(out)
+  verify_zip(archive, {"DATA_NOTICE"} | {f"addons/cs2fow/data/maps/{path.name}" for path in maps})
+  return archive
 
 
 def sha256(path: Path) -> str:
@@ -119,6 +150,8 @@ def sha256(path: Path) -> str:
 def write_checksums(archives: list[Path]) -> None:
   lines = [f"{sha256(path)}  {path.name}" for path in sorted(archives)]
   write_text(PACKAGES / "SHA256SUMS.txt", "\n".join(lines) + "\n")
+  if (PACKAGES / "SHA256SUMS.txt").read_text(encoding="utf-8").splitlines() != lines:
+    raise RuntimeError("checksum file verification failed")
 
 
 def main() -> None:

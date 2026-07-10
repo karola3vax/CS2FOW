@@ -4,7 +4,7 @@ import {TransformControls} from "https://esm.sh/three@0.160.0/examples/jsm/contr
 import {GLTFLoader} from "https://esm.sh/three@0.160.0/examples/jsm/loaders/GLTFLoader.js";
 
 const k_source_units_per_meter = 39.3700787;
-const k_default_preset = "los_points_sas_default.json";
+const k_default_preset = "default_sas_visibility_points.json";
 const k_aabb_color = 0x66e3ff;
 const k_body_color = 0xffd166;
 const k_selected_color = 0xff7a45;
@@ -34,6 +34,31 @@ const read_number = (id) =>
 	return Number.isFinite(value) ? value : 0;
 };
 const clone_point = (point) => ({name: point.name, x: Number(point.x), y: Number(point.y), z: Number(point.z)});
+
+function validated_points(value, label)
+{
+	if (value?.version !== 1 || value.coordinate_space !== "source_local" || value.model !== "ctm_sas")
+	{
+		throw new Error(`${label} has unsupported metadata`);
+	}
+	if (!Array.isArray(value.points) || !Number.isInteger(value.point_count)
+		|| value.point_count !== value.points.length || value.points.length < 1 || value.points.length > 32)
+	{
+		throw new Error(`${label} has an invalid point count`);
+	}
+	const names = new Set();
+	return value.points.map((point) =>
+	{
+		const copy = clone_point(point);
+		if (typeof copy.name !== "string" || !copy.name.trim() || names.has(copy.name)
+			|| !Number.isFinite(copy.x) || !Number.isFinite(copy.y) || !Number.isFinite(copy.z))
+		{
+			throw new Error(`${label} contains an invalid or duplicate point`);
+		}
+		names.add(copy.name);
+		return copy;
+	});
+}
 
 let renderer;
 let camera;
@@ -285,6 +310,7 @@ function export_json()
 		version: 1,
 		coordinate_space: "source_local",
 		model: "ctm_sas",
+		point_count: points.length,
 		points: points.map(clone_point)
 	}, null, "\t") + "\n";
 }
@@ -419,11 +445,7 @@ async function load_preset(url)
 		throw new Error(`${url}: ${response.status}`);
 	}
 	const value = await response.json();
-	if (!Array.isArray(value.points))
-	{
-		throw new Error("preset has no points array");
-	}
-	default_points = value.points.map(clone_point);
+	default_points = validated_points(value, "default preset");
 	set_points(default_points);
 }
 
@@ -557,13 +579,16 @@ function install_ui()
 		{
 			return;
 		}
-		const value = JSON.parse(await file.text());
-		if (!Array.isArray(value.points))
+		try
 		{
-			throw new Error("import has no points array");
+			const value = JSON.parse(await file.text());
+			set_points(validated_points(value, file.name));
+			status_extra = `Imported ${file.name}.`;
 		}
-		set_points(value.points);
-		status_extra = `Imported ${file.name}.`;
+		catch (error)
+		{
+			status_extra = `Import failed: ${error.message || error}`;
+		}
 		update_status();
 	});
 }
@@ -600,6 +625,7 @@ function run_self_checks()
 	expect(generated_aabb_points().length === 8, "AABB fallback count");
 	const roundtrip = JSON.parse(export_json());
 	expect(roundtrip.points.length === points.length, "JSON round trip count");
+	expect(roundtrip.point_count === points.length, "JSON point count metadata");
 	expect(roundtrip.coordinate_space === "source_local", "JSON coordinate space");
 
 	const element = $("self-check");
