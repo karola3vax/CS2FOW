@@ -1,0 +1,98 @@
+#pragma once
+
+// Owns the background ray-casting thread. The game thread gives it copied
+// player data; it never reads live CS2 objects.
+
+#include "bvh8.h"
+#include "visibility_sampling.h"
+
+#include <array>
+#include <atomic>
+#include <chrono>
+#include <condition_variable>
+#include <cstdint>
+#include <memory>
+#include <mutex>
+#include <optional>
+#include <thread>
+
+namespace cs2fow
+{
+
+inline constexpr uint32_t k_max_players = 64;
+
+struct player_state
+{
+	bool valid {};
+	uint8_t team {};
+	vec3 eye;
+	vec3 origin;
+	vec3 velocity;
+	vec3 mins;
+	vec3 maxs;
+	float eye_yaw_degrees {};
+	float rtt_seconds {};
+	weapon_muzzle_class muzzle_class {weapon_muzzle_class::none};
+	int pawn_entity {-1};
+};
+
+struct visibility_snapshot
+{
+	uint64_t sequence {};
+	std::chrono::steady_clock::time_point captured;
+	player_state players[k_max_players];
+};
+
+struct visibility_result
+{
+	uint64_t sequence {};
+	std::chrono::steady_clock::time_point completed;
+	player_state players[k_max_players];
+	bool visible[k_max_players][k_max_players] {};
+	double worker_ms {};
+	uint32_t evaluated_pairs {};
+	uint32_t visible_pairs {};
+	uint32_t hidden_pairs {};
+};
+
+struct worker_stats
+{
+	double latest_ms {};
+	double average_ms {};
+	double maximum_ms {};
+	uint64_t cycles {};
+	uint32_t evaluated_pairs {};
+	uint32_t visible_pairs {};
+	uint32_t hidden_pairs {};
+};
+
+class visibility_worker
+{
+public:
+	~visibility_worker();
+	void start(const bvh8_data *data);
+	void stop();
+	void submit(visibility_snapshot value, uint32_t hold_ms, visibility_tuning tuning);
+	std::shared_ptr<const visibility_result> result() const;
+	worker_stats stats() const;
+
+private:
+	static visibility_player sample_player(const player_state &player);
+	void run();
+
+	const bvh8_data *data_ {};
+	mutable std::mutex mutex_;
+	std::condition_variable condition_;
+	std::optional<visibility_snapshot> pending_;
+	bool stopping_ {true};
+	uint32_t hold_ms_ {};
+	visibility_tuning tuning_;
+	std::thread thread_;
+	std::atomic<std::shared_ptr<const visibility_result>> published_;
+	std::array<std::array<std::array<uint32_t, k_visibility_ray_count_max>, k_max_players>, k_max_players> cached_packets_ {};
+	std::array<std::array<std::chrono::steady_clock::time_point, k_max_players>, k_max_players> revealed_until_ {};
+	mutable std::mutex stats_mutex_;
+	worker_stats stats_;
+};
+
+} // namespace cs2fow

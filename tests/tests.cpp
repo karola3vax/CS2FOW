@@ -6,6 +6,7 @@
 #include "transmit_debug.h"
 #include "transmit_masks.h"
 #include "visibility_sampling.h"
+#include "visibility_worker.h"
 #include "vpk.h"
 
 #include <array>
@@ -18,6 +19,7 @@
 #include <fstream>
 #include <initializer_list>
 #include <iostream>
+#include <memory>
 #include <random>
 #include <string>
 #include <thread>
@@ -382,6 +384,34 @@ void test_visibility_sampling()
 	assert(std::fabs(weapon_muzzle_length(weapon_muzzle_class::rifle) - 36.0f) < 0.01f);
 	assert(std::fabs(weapon_muzzle_length(weapon_muzzle_class::sniper) - 52.0f) < 0.01f);
 	assert(weapon_muzzle_length(weapon_muzzle_class::none) == 0.0f);
+}
+
+void test_visibility_worker()
+{
+	const bvh8_data wall = test_world({
+		{{32, -1000, -1000}, {32, 1000, -1000}, {32, -1000, 1000}},
+		{{32, 1000, 1000}, {32, -1000, 1000}, {32, 1000, -1000}}
+	});
+	visibility_snapshot value;
+	value.sequence = 1;
+	value.players[0] = {true, 2, {0, 0, 64}, {0, 0, 0}, {}, {-16, -16, 0}, {16, 16, 72}};
+	value.players[1] = {true, 3, {64, 0, 64}, {64, 0, 0}, {}, {-16, -16, 0}, {16, 16, 72}};
+
+	auto worker = std::make_unique<visibility_worker>();
+	worker->start(&wall);
+	assert(worker->stats().cycles == 0);
+	worker->submit(value, 0, {1, 0, 0, 0.0f});
+	std::shared_ptr<const visibility_result> result;
+	for (int attempt = 0; attempt < 2000 && !result; ++attempt)
+	{
+		std::this_thread::sleep_for(std::chrono::milliseconds(1));
+		result = worker->result();
+	}
+	assert(result && result->sequence == 1 && !result->visible[0][1]);
+	assert(worker->stats().cycles == 1);
+	worker->start(&wall);
+	assert(worker->stats().cycles == 0);
+	worker->stop();
 }
 
 void test_lifecycle_guard()
@@ -794,6 +824,7 @@ int main(int argc, char **argv)
 	test_subprocess(std::filesystem::absolute(argv[0]));
 	test_glb(directory);
 	test_visibility_sampling();
+	test_visibility_worker();
 	test_lifecycle_guard();
 	test_visual_group_key();
 	test_pair_guard();
