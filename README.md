@@ -351,6 +351,14 @@ cs2fow_debug 0
 triangle counts, worker timings, result age, evaluated pairs, visible totals,
 hidden totals, and automatic bake progress.
 
+`cs2fow_debug 1` silently records actual entity bits that CS2FOW clears from
+the primary transmit list. It does not print continuously. Use
+`cs2fow_entity` to list the newest unique records, `cs2fow_entity <edict>` to
+filter one entity, and `cs2fow_entity clear` to clear the buffer. Records show
+whether an entity was a direct player-group member or was included through an
+owner/effect link. Turning debugging off stops collection but keeps the buffer
+until it is cleared or the plugin's map state resets.
+
 ## Manual Baker
 
 The packaged baker is used automatically by the plugin, but it can also be run
