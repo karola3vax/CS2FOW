@@ -10,8 +10,10 @@
 #include <cassert>
 #include <chrono>
 #include <cmath>
+#include <cstdio>
 #include <cstring>
 #include <fstream>
+#include <iterator>
 #include <limits>
 #include <random>
 #include <thread>
@@ -59,6 +61,63 @@ void write_test_vpk(const std::filesystem::path &path, const char *extension, co
 	stream.close();
 }
 
+void write_extractable_vpk(const std::filesystem::path &path, uint32_t version, uint16_t archive_index,
+	const std::string &preload, const std::string &payload, uint16_t terminator = 0xffffu)
+{
+	std::vector<std::byte> complete;
+	complete.insert(complete.end(), reinterpret_cast<const std::byte *>(preload.data()),
+		reinterpret_cast<const std::byte *>(preload.data() + preload.size()));
+	complete.insert(complete.end(), reinterpret_cast<const std::byte *>(payload.data()),
+		reinterpret_cast<const std::byte *>(payload.data() + payload.size()));
+	std::vector<std::byte> tree;
+	append_string(tree, "vpk");
+	append_string(tree, "maps/workshop/123");
+	append_string(tree, "de_nested");
+	append<uint32_t>(tree, crc32(complete));
+	append<uint16_t>(tree, static_cast<uint16_t>(preload.size()));
+	append<uint16_t>(tree, archive_index);
+	append<uint32_t>(tree, 0u);
+	append<uint32_t>(tree, static_cast<uint32_t>(payload.size()));
+	append<uint16_t>(tree, terminator);
+	tree.insert(tree.end(), reinterpret_cast<const std::byte *>(preload.data()),
+		reinterpret_cast<const std::byte *>(preload.data() + preload.size()));
+	append_string(tree, "");
+	append_string(tree, "");
+	append_string(tree, "");
+	std::ofstream stream(path, std::ios::binary);
+	const uint32_t file_data_size = archive_index == 0x7fffu ? static_cast<uint32_t>(payload.size()) : 0u;
+	if (version == 1)
+	{
+		const uint32_t header[] = {0x55aa1234u, 1u, static_cast<uint32_t>(tree.size())};
+		stream.write(reinterpret_cast<const char *>(header), sizeof(header));
+	}
+	else
+	{
+		const uint32_t header[] = {0x55aa1234u, 2u, static_cast<uint32_t>(tree.size()), file_data_size, 0u, 0u, 0u};
+		stream.write(reinterpret_cast<const char *>(header), sizeof(header));
+	}
+	stream.write(reinterpret_cast<const char *>(tree.data()), static_cast<std::streamsize>(tree.size()));
+	if (archive_index == 0x7fffu)
+	{
+		stream.write(payload.data(), static_cast<std::streamsize>(payload.size()));
+	}
+	stream.close();
+	if (archive_index != 0x7fffu && !payload.empty())
+	{
+		char suffix[16] {};
+		std::snprintf(suffix, sizeof(suffix), "_%03u.vpk", archive_index);
+		const std::string filename = path.filename().string();
+		std::ofstream archive(path.parent_path() / (filename.substr(0, filename.size() - 8u) + suffix), std::ios::binary);
+		archive.write(payload.data(), static_cast<std::streamsize>(payload.size()));
+	}
+}
+
+std::string read_text_file(const std::filesystem::path &path)
+{
+	std::ifstream stream(path, std::ios::binary);
+	return {std::istreambuf_iterator<char>(stream), std::istreambuf_iterator<char>()};
+}
+
 void test_vpk(const std::filesystem::path &directory)
 {
 	const std::filesystem::path path = directory / "test.vpk";
@@ -100,6 +159,44 @@ void test_vpk(const std::filesystem::path &directory)
 	assert(!valid_map_name("/de_test"));
 	assert(!valid_map_name("de_test&command"));
 	assert(!valid_map_name("de_test\\other"));
+
+	const std::filesystem::path embedded = directory / "embedded.vpk";
+	write_extractable_vpk(embedded, 2, 0x7fffu, "pre", "payload");
+	assert(find_vpk_entry(embedded, "maps/workshop/123/de_nested.vpk", entry, error));
+	assert(entry.path == "maps/workshop/123/de_nested.vpk" && entry.size == 10u);
+	std::vector<std::string> maps;
+	assert(list_vpk_maps(embedded, maps, error));
+	assert(maps == std::vector<std::string> {"workshop/123/de_nested"});
+	const std::filesystem::path extracted = directory / "embedded-out.vpk";
+	assert(extract_vpk_entry(embedded, entry, extracted, error));
+	assert(read_text_file(extracted) == "prepayload");
+
+	const std::filesystem::path preload_only = directory / "preload.vpk";
+	write_extractable_vpk(preload_only, 1, 0x7fffu, "only-preload", "");
+	assert(find_vpk_entry(preload_only, "maps/workshop/123/de_nested.vpk", entry, error));
+	assert(extract_vpk_entry(preload_only, entry, directory / "preload-out.vpk", error));
+	assert(read_text_file(directory / "preload-out.vpk") == "only-preload");
+
+	const std::filesystem::path numbered = directory / "numbered_dir.vpk";
+	write_extractable_vpk(numbered, 2, 0, "head", "archive");
+	assert(find_vpk_entry(numbered, "maps/workshop/123/de_nested.vpk", entry, error));
+	assert(extract_vpk_entry(numbered, entry, directory / "numbered-out.vpk", error));
+	assert(read_text_file(directory / "numbered-out.vpk") == "headarchive");
+	std::fstream archive(directory / "numbered_000.vpk", std::ios::binary | std::ios::in | std::ios::out);
+	archive.put('X');
+	archive.close();
+	assert(!extract_vpk_entry(numbered, entry, directory / "bad-crc.vpk", error));
+
+	const std::filesystem::path truncated = directory / "truncated_dir.vpk";
+	write_extractable_vpk(truncated, 2, 0, "", "archive");
+	assert(find_vpk_entry(truncated, "maps/workshop/123/de_nested.vpk", entry, error));
+	std::filesystem::resize_file(directory / "truncated_000.vpk", 2);
+	assert(!extract_vpk_entry(truncated, entry, directory / "truncated-out.vpk", error));
+
+	const std::filesystem::path invalid_terminator = directory / "invalid-terminator.vpk";
+	write_extractable_vpk(invalid_terminator, 2, 0x7fffu, "", "data", 0u);
+	std::vector<vpk_entry> entries;
+	assert(!list_vpk_entries(invalid_terminator, entries, error));
 }
 
 void test_subprocess(const std::filesystem::path &executable)

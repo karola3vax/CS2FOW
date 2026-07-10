@@ -26,6 +26,7 @@ struct arguments
 	std::filesystem::path vpk;
 	std::filesystem::path debug_obj;
 	bool low_priority {};
+	bool list_maps {};
 };
 
 std::string json_escape(const std::string &value)
@@ -51,6 +52,10 @@ bool parse_arguments(int argc, char **argv, arguments &result)
 		{
 			result.low_priority = true;
 		}
+		else if (option == "--list-maps")
+		{
+			result.list_maps = true;
+		}
 		else if ((option == "--game" || option == "--map" || option == "--output" || option == "--vrf" || option == "--vpk" || option == "--debug-obj") && i + 1 < argc)
 		{
 			const std::string value = argv[++i];
@@ -65,6 +70,10 @@ bool parse_arguments(int argc, char **argv, arguments &result)
 		{
 			return false;
 		}
+	}
+	if (result.list_maps)
+	{
+		return !result.vpk.empty();
 	}
 	if (result.game.empty() || result.map.empty())
 	{
@@ -145,23 +154,12 @@ bool export_glb(const arguments &args, const std::filesystem::path &vpk, const s
 	return true;
 }
 
-bool extract_nested_map(const arguments &args, const map_source &source, const std::filesystem::path &temporary,
+bool extract_nested_map(const map_source &source, const std::filesystem::path &temporary,
 	std::filesystem::path &map_vpk, std::string &error)
 {
 	const std::filesystem::path output = temporary / "nested";
-	std::filesystem::create_directories(output);
-	if (!invoke_vrf(args, {"-i", source.vpk.string(), "-o", output.string(), "--decompile", "--vpk_filepath", source.entry}, error))
-	{
-		return false;
-	}
 	map_vpk = output / std::filesystem::path(source.entry);
-	std::error_code filesystem_error;
-	if (!std::filesystem::is_regular_file(map_vpk, filesystem_error) || std::filesystem::file_size(map_vpk, filesystem_error) != source.metadata.size)
-	{
-		error = "VRF did not extract the complete nested map VPK";
-		return false;
-	}
-	return true;
+	return extract_vpk_entry(source.vpk, source.metadata, map_vpk, error);
 }
 
 bool write_obj(const std::filesystem::path &path, const std::vector<triangle> &triangles, std::string &error)
@@ -229,8 +227,24 @@ int run(int argc, char **argv)
 	arguments args;
 	if (!parse_arguments(argc, argv, args))
 	{
-		std::cerr << "usage: cs2fow_baker --game <cs2-root> --map <name> [--vpk <file>] [--low-priority] [--output <file>] [--vrf <path>] [--debug-obj <file>]\n";
+		std::cerr << "usage: cs2fow_baker --game <cs2-root> --map <name> [--vpk <file>] [--low-priority] [--output <file>] [--vrf <path>] [--debug-obj <file>]\n"
+			<< "       cs2fow_baker --list-maps --vpk <file>\n";
 		return 2;
+	}
+	if (args.list_maps)
+	{
+		std::vector<std::string> maps;
+		std::string error;
+		if (!list_vpk_maps(args.vpk, maps, error))
+		{
+			std::cerr << "cs2fow_baker: " << error << '\n';
+			return 1;
+		}
+		for (const std::string &map : maps)
+		{
+			std::cout << map << '\n';
+		}
+		return 0;
 	}
 	if (!valid_map_name(args.map))
 	{
@@ -257,7 +271,7 @@ int run(int argc, char **argv)
 	const std::filesystem::path temporary = std::filesystem::temp_directory_path() / ("cs2fow-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
 	std::filesystem::create_directories(temporary);
 	std::filesystem::path map_vpk = vpk;
-	if (source.flags == k_bvh8_flag_nested_map_vpk && !extract_nested_map(args, source, temporary, map_vpk, error))
+	if (source.flags == k_bvh8_flag_nested_map_vpk && !extract_nested_map(source, temporary, map_vpk, error))
 	{
 		std::cerr << "cs2fow_baker: " << error << '\n';
 		std::filesystem::remove_all(temporary);

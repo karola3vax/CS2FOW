@@ -21,6 +21,7 @@ struct map_source
 
 bool valid_map_name(std::string_view map);
 std::vector<std::filesystem::path> vpk_path_candidates(std::string path);
+bool list_vpk_maps(const std::filesystem::path &vpk, std::vector<std::string> &maps, std::string &error);
 bool find_map_source(const std::filesystem::path &vpk, const std::string &map, map_source &source, std::string &error);
 bool same_map_source(const map_source &left, const map_source &right);
 

@@ -105,6 +105,7 @@ struct ray_hit
 };
 
 uint32_t crc32(std::span<const std::byte> bytes);
+uint32_t crc32_extend(uint32_t previous_crc, std::span<const std::byte> bytes);
 bool cpu_supports_avx();
 bool validate_bvh8(const bvh8_data &data, std::string &error);
 bool load_bvh8(const std::filesystem::path &path, bvh8_data &data, std::string &error);

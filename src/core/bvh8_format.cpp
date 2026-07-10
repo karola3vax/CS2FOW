@@ -70,30 +70,6 @@ bool read_exact(std::ifstream &stream, void *destination, size_t size)
 	return stream.good();
 }
 
-class crc32_state
-{
-public:
-	void update(std::span<const std::byte> bytes)
-	{
-		for (const std::byte byte : bytes)
-		{
-			value_ ^= static_cast<uint8_t>(byte);
-			for (int bit = 0; bit < 8; ++bit)
-			{
-				value_ = (value_ >> 1u) ^ (0xedb88320u & (0u - (value_ & 1u)));
-			}
-		}
-	}
-
-	uint32_t finish() const
-	{
-		return ~value_;
-	}
-
-private:
-	uint32_t value_ {0xffffffffu};
-};
-
 template <typename type>
 std::span<const std::byte> bytes_of(const std::vector<type> &values)
 {
@@ -102,10 +78,7 @@ std::span<const std::byte> bytes_of(const std::vector<type> &values)
 
 uint32_t payload_crc(const bvh8_data &data)
 {
-	crc32_state state;
-	state.update(bytes_of(data.nodes));
-	state.update(bytes_of(data.packets));
-	return state.finish();
+	return crc32_extend(crc32_extend(0, bytes_of(data.nodes)), bytes_of(data.packets));
 }
 
 bool validate_header(const bvh8_header &header, uint64_t actual_size, std::string &error)
@@ -191,9 +164,21 @@ bool replace_file(const std::filesystem::path &temporary, const std::filesystem:
 
 uint32_t crc32(std::span<const std::byte> bytes)
 {
-	crc32_state state;
-	state.update(bytes);
-	return state.finish();
+	return crc32_extend(0, bytes);
+}
+
+uint32_t crc32_extend(uint32_t previous_crc, std::span<const std::byte> bytes)
+{
+	uint32_t value = ~previous_crc;
+	for (const std::byte byte : bytes)
+	{
+		value ^= static_cast<uint8_t>(byte);
+		for (int bit = 0; bit < 8; ++bit)
+		{
+			value = (value >> 1u) ^ (0xedb88320u & (0u - (value & 1u)));
+		}
+	}
+	return ~value;
 }
 
 bool validate_bvh8(const bvh8_data &data, std::string &error)

@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <set>
 
 namespace cs2fow
 {
@@ -65,6 +66,39 @@ std::vector<std::filesystem::path> vpk_path_candidates(std::string path)
 		candidates.emplace_back(path.substr(0, path.size() - 4u) + "_dir.vpk");
 	}
 	return candidates;
+}
+
+bool list_vpk_maps(const std::filesystem::path &vpk, std::vector<std::string> &maps, std::string &error)
+{
+	maps.clear();
+	std::vector<vpk_entry> entries;
+	if (!list_vpk_entries(vpk, entries, error))
+	{
+		return false;
+	}
+	constexpr std::string_view prefix = "maps/";
+	constexpr std::string_view physics_suffix = "/world_physics.vmdl_c";
+	constexpr std::string_view vpk_suffix = ".vpk";
+	std::set<std::string> unique;
+	for (const vpk_entry &entry : entries)
+	{
+		const std::string_view path = entry.path;
+		std::string_view map;
+		if (path.starts_with(prefix) && path.ends_with(physics_suffix))
+		{
+			map = path.substr(prefix.size(), path.size() - prefix.size() - physics_suffix.size());
+		}
+		else if (path.starts_with(prefix) && path.ends_with(vpk_suffix))
+		{
+			map = path.substr(prefix.size(), path.size() - prefix.size() - vpk_suffix.size());
+		}
+		if (valid_map_name(map))
+		{
+			unique.emplace(map);
+		}
+	}
+	maps.assign(unique.begin(), unique.end());
+	return true;
 }
 
 bool find_map_source(const std::filesystem::path &vpk, const std::string &map, map_source &source, std::string &error)
