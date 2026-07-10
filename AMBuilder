@@ -2,6 +2,8 @@ import os
 
 root = builder.sourcePath
 sdk = config.sdk_target.sdk
+with open(os.path.join(root, 'VERSION'), encoding='utf-8') as version_file:
+  version = version_file.read().strip()
 
 def configure(compiler, plugin=False):
   compiler.cxxincludes += [
@@ -29,18 +31,20 @@ def configure(compiler, plugin=False):
     compiler.defines += ['NDEBUG']
     compiler.cflags += ['/O2'] if compiler.behavior == 'msvc' else ['-O3']
 
-core = [
+geometry = [
   os.path.join(root, 'src', 'core', 'bvh8.cpp'),
   os.path.join(root, 'src', 'core', 'builder.cpp'),
+]
+
+map_io = [
   os.path.join(root, 'src', 'core', 'map_source.cpp'),
-  os.path.join(root, 'src', 'core', 'subprocess.cpp'),
-  os.path.join(root, 'src', 'core', 'visibility_sampling.cpp'),
   os.path.join(root, 'src', 'core', 'vpk.cpp'),
 ]
 
 baker = config.cxx.Program('cs2fow_baker')
 configure(baker.compiler)
-baker.sources += core + [
+baker.sources += geometry + map_io + [
+  os.path.join(root, 'src', 'core', 'subprocess.cpp'),
   os.path.join(root, 'src', 'baker', 'glb_import.cpp'),
   os.path.join(root, 'src', 'baker', 'main.cpp'),
 ]
@@ -50,7 +54,9 @@ tests = config.cxx.Program('cs2fow_tests')
 configure(tests.compiler)
 if 'NDEBUG' in tests.compiler.defines:
   tests.compiler.defines.remove('NDEBUG')
-tests.sources += core + [
+tests.sources += geometry + map_io + [
+  os.path.join(root, 'src', 'core', 'subprocess.cpp'),
+  os.path.join(root, 'src', 'core', 'visibility_sampling.cpp'),
   os.path.join(root, 'src', 'baker', 'glb_import.cpp'),
   os.path.join(root, 'tests', 'tests.cpp'),
 ]
@@ -66,7 +72,7 @@ plugin.compiler.cxxincludes += [
 ]
 for manifest in config.sdk_manifests:
   plugin.compiler.defines += ['SE_{}={}'.format(manifest['define'], manifest['code'])]
-plugin.compiler.defines += ['META_IS_SOURCE2']
+plugin.compiler.defines += ['META_IS_SOURCE2', 'CS2FOW_VERSION="{}"'.format(version)]
 config.SdkHelpers.configureCxx(builder, plugin, sdk)
 plugin.sources += [
   os.path.join(root, 'src', 'core', 'bvh8.cpp'),

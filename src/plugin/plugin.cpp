@@ -709,7 +709,7 @@ public:
 	const char *GetDescription() override { return "Server-side fog-of-war visibility culling for Counter-Strike 2"; }
 	const char *GetURL() override { return "https://github.com/karola3vax/CS2FOW"; }
 	const char *GetLicense() override { return "MIT"; }
-	const char *GetVersion() override { return "0.1.2-preview"; }
+	const char *GetVersion() override { return CS2FOW_VERSION; }
 	const char *GetDate() override { return __DATE__; }
 	const char *GetLogTag() override { return "CS2FOW"; }
 

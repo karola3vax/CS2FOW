@@ -6,7 +6,6 @@ on:
   workflow_dispatch:
 
 env:
-  MMS_DIR: metamod-source-a5f4cca5824c0c5f13e8fa100dd15df164d2db22
   MMS_COMMIT: a5f4cca5824c0c5f13e8fa100dd15df164d2db22
   HL2SDK_COMMIT: 9ab16fa9fcdeeb30565dfdbf6fbb312356978a0b
   AMBUILD_COMMIT: d89ec91a7ac2607da07b50bb62346f9a10e9a998
@@ -30,11 +29,13 @@ jobs:
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force ..\references | Out-Null
-          git clone --depth 1 https://github.com/alliedmodders/ambuild.git ..\references\ambuild
-          git -C ..\references\ambuild checkout ${{ env.AMBUILD_COMMIT }}
-          git clone https://github.com/alliedmodders/metamod-source.git ..\references\${{ env.MMS_DIR }}
-          git -C ..\references\${{ env.MMS_DIR }} checkout ${{ env.MMS_COMMIT }}
-          git -C ..\references\${{ env.MMS_DIR }} submodule update --init hl2sdk-manifests
+          git init ..\references\ambuild
+          git -C ..\references\ambuild remote add origin https://github.com/alliedmodders/ambuild.git
+          git -C ..\references\ambuild fetch --depth 1 origin ${{ env.AMBUILD_COMMIT }}
+          git -C ..\references\ambuild checkout --detach FETCH_HEAD
+          git clone https://github.com/alliedmodders/metamod-source.git ..\references\metamod-source
+          git -C ..\references\metamod-source checkout ${{ env.MMS_COMMIT }}
+          git -C ..\references\metamod-source submodule update --init hl2sdk-manifests
           git clone --branch cs2 https://github.com/alliedmodders/hl2sdk.git ..\references\hl2sdk-cs2
           git -C ..\references\hl2sdk-cs2 checkout ${{ env.HL2SDK_COMMIT }}
 
@@ -70,7 +71,7 @@ jobs:
         with:
           name: cs2fow-windows-x86_64
           path: |
-            packages/cs2fow-0.1.2-preview-windows-x86_64.zip
+            packages/cs2fow-*-windows-x86_64.zip
             packages/SHA256SUMS.txt
 
   linux:
@@ -88,11 +89,13 @@ jobs:
       - name: Fetch build references
         run: |
           mkdir -p ../references
-          git clone --depth 1 https://github.com/alliedmodders/ambuild.git ../references/ambuild
-          git -C ../references/ambuild checkout ${AMBUILD_COMMIT}
-          git clone https://github.com/alliedmodders/metamod-source.git ../references/${MMS_DIR}
-          git -C ../references/${MMS_DIR} checkout ${MMS_COMMIT}
-          git -C ../references/${MMS_DIR} submodule update --init hl2sdk-manifests
+          git init ../references/ambuild
+          git -C ../references/ambuild remote add origin https://github.com/alliedmodders/ambuild.git
+          git -C ../references/ambuild fetch --depth 1 origin ${AMBUILD_COMMIT}
+          git -C ../references/ambuild checkout --detach FETCH_HEAD
+          git clone https://github.com/alliedmodders/metamod-source.git ../references/metamod-source
+          git -C ../references/metamod-source checkout ${MMS_COMMIT}
+          git -C ../references/metamod-source submodule update --init hl2sdk-manifests
           git clone --branch cs2 https://github.com/alliedmodders/hl2sdk.git ../references/hl2sdk-cs2
           git -C ../references/hl2sdk-cs2 checkout ${HL2SDK_COMMIT}
 
@@ -171,5 +174,5 @@ jobs:
         with:
           name: cs2fow-linux-x86_64
           path: |
-            packages/cs2fow-0.1.2-preview-linux-x86_64.zip
+            packages/cs2fow-*-linux-x86_64.zip
             packages/SHA256SUMS.txt
