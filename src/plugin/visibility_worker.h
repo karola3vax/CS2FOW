@@ -8,7 +8,6 @@
 #include "visibility_sampling.h"
 
 #include <array>
-#include <atomic>
 #include <chrono>
 #include <condition_variable>
 #include <cstdint>
@@ -89,7 +88,7 @@ private:
 	uint32_t hold_ms_ {};
 	visibility_tuning tuning_;
 	std::thread thread_;
-	std::atomic<std::shared_ptr<const visibility_result>> published_;
+	std::shared_ptr<const visibility_result> published_;
 	std::array<std::array<std::array<uint32_t, k_visibility_ray_count_max>, k_max_players>, k_max_players> cached_packets_ {};
 	std::array<std::array<std::chrono::steady_clock::time_point, k_max_players>, k_max_players> revealed_until_ {};
 	mutable std::mutex stats_mutex_;

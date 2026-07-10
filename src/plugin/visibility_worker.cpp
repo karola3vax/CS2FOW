@@ -49,7 +49,7 @@ void visibility_worker::stop()
 	{
 		thread_.join();
 	}
-	published_.store({});
+	std::atomic_store(&published_, std::shared_ptr<const visibility_result> {});
 	data_ = nullptr;
 }
 
@@ -66,7 +66,7 @@ void visibility_worker::submit(visibility_snapshot value, uint32_t hold_ms, visi
 
 std::shared_ptr<const visibility_result> visibility_worker::result() const
 {
-	return published_.load();
+	return std::atomic_load(&published_);
 }
 
 worker_stats visibility_worker::stats() const
@@ -169,7 +169,7 @@ void visibility_worker::run()
 			stats_.visible_pairs = result->visible_pairs;
 			stats_.hidden_pairs = result->hidden_pairs;
 		}
-		published_.store(std::move(result));
+		std::atomic_store(&published_, std::shared_ptr<const visibility_result> {std::move(result)});
 	}
 }
 
