@@ -3,6 +3,7 @@
 #include "lifecycle_guard.h"
 #include "map_source.h"
 #include "subprocess.h"
+#include "transmit_debug.h"
 #include "transmit_masks.h"
 #include "visibility_sampling.h"
 #include "vpk.h"
@@ -510,21 +511,83 @@ void test_checktransmit_private_offsets()
 	assert(read_checktransmit_full_update(&info, 32));
 }
 
+void test_transmit_debug()
+{
+	assert(transmit_member_from_links(false, false) == transmit_member_kind::direct);
+	assert(transmit_member_from_links(true, false) == transmit_member_kind::owner_link);
+	assert(transmit_member_from_links(false, true) == transmit_member_kind::effect_link);
+	assert(transmit_member_from_links(true, true) == transmit_member_kind::owner_effect_link);
+
+	struct test_mask
+	{
+		bool set {};
+		int checks {};
+		int clears {};
+
+		bool IsBitSet(int)
+		{
+			++checks;
+			return set;
+		}
+
+		void Clear(int)
+		{
+			++clears;
+			set = false;
+		}
+	};
+
+	test_mask mask {true};
+	assert(!clear_transmit_bit(mask, 10, false));
+	assert(mask.checks == 0 && mask.clears == 1 && !mask.set);
+	assert(!clear_transmit_bit(mask, 10, true));
+	assert(mask.checks == 1 && mask.clears == 2);
+	mask.set = true;
+	assert(clear_transmit_bit(mask, 10, true));
+	assert(mask.checks == 2 && mask.clears == 3 && !mask.set);
+
+	using clock = std::chrono::steady_clock;
+	const auto start = clock::time_point {} + std::chrono::seconds(10);
+	transmit_debug_log<2, 16> log;
+	transmit_debug_event first {10, 100, 1, 0, 0, 1, transmit_member_kind::direct, k_transmit_reason_current, start};
+	log.record(first, "player");
+	first.recipient_slot = 3;
+	first.reason = k_transmit_reason_quarantine;
+	first.when += std::chrono::milliseconds(5);
+	log.record(first, "player");
+	const auto &records = log.records();
+	assert(records[0].valid && records[0].clears == 2 && records[0].recipients == ((uint64_t {1} << 1) | (uint64_t {1} << 3)));
+	assert(records[0].reasons == (k_transmit_reason_current | k_transmit_reason_quarantine));
+	assert(records[0].first_seen == start && records[0].last_seen == start + std::chrono::milliseconds(5));
+
+	transmit_debug_event second {20, 200, 2, 10, 0, 2, transmit_member_kind::owner_link, k_transmit_reason_current, start};
+	transmit_debug_event third {30, 300, 3, 0, 20, 3, transmit_member_kind::effect_link, k_transmit_reason_current, start};
+	log.record(second, "weapon");
+	log.record(third, "effect");
+	assert(records[0].handle == 300 && records[1].handle == 200);
+	log.clear();
+	assert(!records[0].valid && !records[1].valid);
+}
+
 void test_hidden_entity_group()
 {
 	using clock = std::chrono::steady_clock;
 	const auto start = clock::time_point {} + std::chrono::seconds(30);
-	hidden_entity_group<uint32_t, 4> group;
+	hidden_entity_group<uint32_t, 5> source;
 	std::array<uint32_t, 4> handles {10, 11, 12, 0};
+	source.source = 10;
+	std::copy(handles.begin(), handles.end(), source.handles.begin());
+	source.count = 3;
+	hidden_entity_group<uint32_t, 5> group;
 
-	hidden_group_store(group, 10u, handles, 3, start, std::chrono::milliseconds(3000));
+	hidden_group_store(group, source, start, std::chrono::milliseconds(3000));
 	assert(group.count == 3);
 	assert(group.source == 10u);
 	assert(hidden_group_quarantined(group, start + std::chrono::milliseconds(2999)));
 	assert(!hidden_group_quarantined(group, start + std::chrono::milliseconds(3000)));
 	assert(group.count == 0);
 
-	hidden_group_store(group, 10u, handles, 3, start, std::chrono::milliseconds(3000));
+	hidden_group_store(group, source, start, std::chrono::milliseconds(3000));
 	std::array<bool, 16> marked {};
 	marked[10] = true;
 	marked[11] = true;
@@ -536,17 +599,24 @@ void test_hidden_entity_group()
 	group.handles[0] = 10;
 	group.handles[1] = 20;
 	group.count = 2;
-	const std::array<owner_effect_link<uint32_t>, 4> links {{
+	const std::array<owner_effect_link<uint32_t>, 5> links {{
 		{30, 10, 0},
 		{31, 0, 20},
+		{32, 10, 20},
 		{32, 99, 98},
 		{20, 10, 0}
 	}};
 	assert(hidden_group_append_owner_effect_links(group, links.data(), links.size(), [](uint32_t child) { return child != 0; }));
-	assert(group.count == 4);
+	assert(group.count == 5);
 	assert(hidden_group_contains(group, 30u, group.count));
 	assert(hidden_group_contains(group, 31u, group.count));
-	assert(!hidden_group_contains(group, 32u, group.count));
+	assert(hidden_group_contains(group, 32u, group.count));
+	assert(group.link_owners[2] == 10 && group.link_effects[2] == 0);
+	assert(group.link_owners[3] == 0 && group.link_effects[3] == 20);
+	assert(group.link_owners[4] == 10 && group.link_effects[4] == 20);
+	hidden_entity_group<uint32_t, 5> stored;
+	hidden_group_store(stored, group, start, std::chrono::milliseconds(3000));
+	assert(stored.link_owners == group.link_owners && stored.link_effects == group.link_effects);
 
 	const std::array<owner_effect_link<uint32_t>, 1> overflow {{{33, 10, 0}}};
 	assert(!hidden_group_append_owner_effect_links(group, overflow.data(), overflow.size(), [](uint32_t) { return true; }));
@@ -717,6 +787,7 @@ int main(int argc, char **argv)
 	test_visual_group_key();
 	test_pair_guard();
 	test_checktransmit_private_offsets();
+	test_transmit_debug();
 	test_hidden_entity_group();
 	test_bvh(directory);
 	std::filesystem::remove_all(directory);

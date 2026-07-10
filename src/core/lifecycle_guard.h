@@ -54,6 +54,8 @@ template <typename handle_type, size_t max_count>
 struct hidden_entity_group
 {
 	std::array<handle_type, max_count> handles {};
+	std::array<handle_type, max_count> link_owners {};
+	std::array<handle_type, max_count> link_effects {};
 	handle_type source {};
 	size_t count {};
 	std::chrono::steady_clock::time_point quarantine_until {};
@@ -175,12 +177,10 @@ inline void hidden_group_clear(hidden_entity_group<handle_type, max_count> &grou
 
 template <typename handle_type, size_t max_count>
 inline void hidden_group_store(hidden_entity_group<handle_type, max_count> &group,
-	const handle_type &source, const std::array<handle_type, max_count> &handles, size_t count,
+	const hidden_entity_group<handle_type, max_count> &source,
 	std::chrono::steady_clock::time_point now, std::chrono::milliseconds quarantine)
 {
-	group.source = source;
-	group.handles = handles;
-	group.count = count > max_count ? max_count : count;
+	group = source;
 	group.quarantine_until = now + quarantine;
 }
 
@@ -250,7 +250,9 @@ inline bool hidden_group_append_owner_effect_links(hidden_entity_group<handle_ty
 		{
 			continue;
 		}
-		if (!hidden_group_contains(group, link.owner, base_count) && !hidden_group_contains(group, link.effect, base_count))
+		const bool owner_matches = hidden_group_contains(group, link.owner, base_count);
+		const bool effect_matches = hidden_group_contains(group, link.effect, base_count);
+		if (!owner_matches && !effect_matches)
 		{
 			continue;
 		}
@@ -258,7 +260,10 @@ inline bool hidden_group_append_owner_effect_links(hidden_entity_group<handle_ty
 		{
 			return false;
 		}
-		group.handles[group.count++] = link.child;
+		group.handles[group.count] = link.child;
+		if (owner_matches) group.link_owners[group.count] = link.owner;
+		if (effect_matches) group.link_effects[group.count] = link.effect;
+		++group.count;
 	}
 	return true;
 }
