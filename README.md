@@ -48,6 +48,16 @@ HLTV, spectators, dead players, teammates, and a player viewing themself are not
 
 The worker receives copied numbers only. It never reads live CS2 objects.
 
+## Baked map geometry
+
+This is the simplified static collision mesh CS2FOW uses for its ray checks:
+
+<div align="center">
+
+![Static map geometry seen by CS2FOW](docs/scan_cbbl.png)
+
+</div>
+
 ## Installation and configuration
 
 The core ZIP installs these operator-facing paths:
@@ -103,6 +113,66 @@ Important limits:
 - After CS2FOW hides a visual group, it keeps that group hidden until CS2 naturally gives that recipient a full update. CS2FOW never requests a full update, so a newly visible enemy can remain hidden longer than the ray decision alone would suggest.
 - `CheckTransmit` changes only `m_pTransmitEntity`, the verified primary send list. Full-update snapshots are never filtered.
 - Builds and unit tests cannot reproduce a live CS2 transmit list or prove that a server will never hit a game-engine entity-copy crash. Live-server packet testing is a separate validation step.
+
+## FAQ
+
+### What is CS2FOW?
+
+CS2FOW is a server-side anti-wallhack plugin for Counter-Strike 2 community servers. When solid map walls completely hide a living enemy, it can stop sending that enemy's visual entities to one opposing player.
+
+It is not a screen filter and does not run on the player's computer.
+
+### Does it work in Premier or Valve matchmaking?
+
+No. It requires a community or dedicated server running Metamod:Source. Valve would need to add a similar system for official matchmaking.
+
+### Do players install anything or risk a VAC ban?
+
+Players install nothing. CS2FOW runs only on the server and does not modify or inject into the CS2 client.
+
+### Can a cheat bypass it?
+
+A cheat cannot recover an exact live enemy position that the server never sent. It can still use sound, teammate information, last-known positions, common prefire spots, and other game clues. CS2FOW reduces the main wallhack data source; it does not make all cheating impossible.
+
+### What exactly gets hidden?
+
+For a living enemy, CS2FOW treats the pawn, current weapons, wearables, carried hostage prop, and directly linked owner/effect entities as one visual group.
+
+Teammates, self, dead players, spectators, and HLTV remain unfiltered.
+
+### Can players still wallbang a hidden enemy?
+
+Yes. The enemy remains fully present on the server. Movement, hit registration, penetration, damage, and game rules continue normally.
+
+### Does it block radar cheats or sound ESP?
+
+It reduces radar cheats that depend on live enemy entity positions. It does not remove footsteps, gunshots, teammate information, bomb information, or every other clue.
+
+### What about smokes, doors, breakables, and moving props?
+
+They are not visibility blockers in the current preview. CS2FOW checks baked static map geometry only.
+
+### How does it avoid enemies appearing too late around corners?
+
+The worker checks body points, bounding-box corners, and the held weapon muzzle. It also uses movement and latency lookahead and briefly keeps newly revealed enemies visible.
+
+After an enemy has been hidden, CS2FOW waits for CS2's own full refresh before allowing that visual group to return. This protects entity consistency, but it can occasionally keep a newly visible enemy hidden longer than the ray result alone.
+
+### Does it run expensive engine traces every tick?
+
+No. Map collision is baked into a compact BVH8 file. A background worker casts rays against that data, while `CheckTransmit` only reads the finished answer.
+
+### Do custom and Workshop maps work?
+
+Yes, when their physics can be baked. The server can bake a mounted map automatically, and the separate Bake Service can prepare downloadable `.bvh8` and `.json` files from a public Workshop item.
+
+### What happens when a map changes?
+
+CS2FOW compares the current source CRC and size with the stored bake. A mismatched or outdated bake is rejected, the plugin shows players normally, and an automatic rebake can create current data.
+
+### What does “fail open” mean?
+
+If CS2FOW is missing information or is not sure that filtering is safe, it sends players normally instead of hiding them.
 
 ## Troubleshooting
 
