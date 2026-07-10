@@ -31,7 +31,8 @@ struct bounds
 	vec3 max;
 };
 
-inline constexpr uint32_t k_bvh8_version = 2;
+inline constexpr uint32_t k_bvh8_version = 3;
+inline constexpr uint32_t k_bvh8_recipe_version = 1;
 inline constexpr uint32_t k_bvh8_flag_nested_map_vpk = 1u << 0u;
 inline constexpr uint32_t k_bvh8_known_flags = k_bvh8_flag_nested_map_vpk;
 inline constexpr uint32_t k_invalid_ref = 0xffffffffu;
@@ -82,7 +83,7 @@ struct alignas(32) bvh8_header
 	uint64_t packets_offset;
 	uint64_t file_size;
 	uint32_t payload_crc32;
-	uint32_t reserved0;
+	uint32_t bake_recipe_version;
 	uint8_t reserved[88];
 };
 
