@@ -1,11 +1,11 @@
+#include "automatic_baker.h"
 #include "bvh8.h"
 #include "lifecycle_guard.h"
 #include "map_source.h"
-#include "subprocess.h"
 #include "transmit_debug.h"
 #include "transmit_masks.h"
 #include "vpk.h"
-#include "visibility_sampling.h"
+#include "visibility_worker.h"
 
 #include <ISmmPlugin.h>
 #include <eiface.h>
@@ -20,11 +20,9 @@
 
 #include <algorithm>
 #include <array>
-#include <atomic>
 #include <charconv>
 #include <chrono>
 #include <cmath>
-#include <condition_variable>
 #include <cstdio>
 #include <cstdint>
 #include <cstdlib>
@@ -32,13 +30,10 @@
 #include <cctype>
 #include <filesystem>
 #include <fstream>
-#include <memory>
 #include <mutex>
-#include <optional>
 #include <sstream>
 #include <string>
 #include <string_view>
-#include <thread>
 #include <vector>
 
 PLUGIN_GLOBALVARS();
@@ -46,7 +41,6 @@ PLUGIN_GLOBALVARS();
 namespace cs2fow
 {
 
-constexpr uint32_t k_max_players = 64;
 constexpr uint32_t k_max_weapons = 64;
 constexpr uint32_t k_max_wearables = 32;
 constexpr uint32_t k_max_aux_visual_group_entities = 32;
@@ -62,7 +56,6 @@ constexpr uint8_t k_team_ct = 3;
 constexpr auto k_lifecycle_fail_open = std::chrono::milliseconds(3000);
 constexpr auto k_hidden_entity_quarantine = std::chrono::milliseconds(3000);
 constexpr auto k_pair_baseline_warmup = std::chrono::milliseconds(1500);
-constexpr auto k_auto_bake_timeout = std::chrono::minutes(10);
 static_assert(MAX_EDICTS == 16384);
 
 class game_resource_service
@@ -108,28 +101,6 @@ struct schema_offsets
 	uint32_t effect_entity {};
 };
 
-struct player_state
-{
-	bool valid {};
-	uint8_t team {};
-	vec3 eye;
-	vec3 origin;
-	vec3 velocity;
-	vec3 mins;
-	vec3 maxs;
-	float eye_yaw_degrees {};
-	float rtt_seconds {};
-	weapon_muzzle_class muzzle_class {weapon_muzzle_class::none};
-	int pawn_entity {-1};
-};
-
-struct snapshot
-{
-	uint64_t sequence {};
-	std::chrono::steady_clock::time_point captured;
-	player_state players[k_max_players];
-};
-
 struct live_player
 {
 	CEntityInstance *pawn {};
@@ -172,34 +143,11 @@ visual_group_key make_current_visual_group_key(const visual_entity_group &group)
 	return make_visual_group_key(values, group.count);
 }
 
-struct visibility_result
-{
-	uint64_t sequence {};
-	std::chrono::steady_clock::time_point completed;
-	player_state players[k_max_players];
-	bool visible[k_max_players][k_max_players] {};
-	double worker_ms {};
-	uint32_t evaluated_pairs {};
-	uint32_t visible_pairs {};
-	uint32_t hidden_pairs {};
-};
-
 struct qangle
 {
 	float x {};
 	float y {};
 	float z {};
-};
-
-struct worker_stats
-{
-	double latest_ms {};
-	double average_ms {};
-	double maximum_ms {};
-	uint64_t cycles {};
-	uint32_t evaluated_pairs {};
-	uint32_t visible_pairs {};
-	uint32_t hidden_pairs {};
 };
 
 template <typename type>
@@ -367,328 +315,6 @@ int resolve_entity_index(CGameEntitySystem *system, CEntityHandle handle)
 	return entity_index(system->GetEntityInstance(handle));
 }
 
-class visibility_worker
-{
-public:
-	void start(const bvh8_data *data)
-	{
-		stop();
-		data_ = data;
-		stopping_ = false;
-		for (auto &observer : cached_packets_)
-		{
-			for (auto &target : observer)
-			{
-				target.fill(k_invalid_ref);
-			}
-		}
-		for (auto &observer : revealed_until_)
-		{
-			observer.fill(std::chrono::steady_clock::time_point {});
-		}
-		thread_ = std::thread(&visibility_worker::run, this);
-	}
-
-	void stop()
-	{
-		{
-			std::lock_guard lock(mutex_);
-			stopping_ = true;
-			pending_.reset();
-		}
-		condition_.notify_one();
-		if (thread_.joinable())
-		{
-			thread_.join();
-		}
-		std::atomic_store(&published_, std::shared_ptr<const visibility_result> {});
-		data_ = nullptr;
-	}
-
-	void submit(snapshot value, uint32_t hold_ms, visibility_tuning tuning)
-	{
-		{
-			std::lock_guard lock(mutex_);
-			pending_ = std::move(value);
-			hold_ms_ = hold_ms;
-			tuning_ = tuning;
-		}
-		condition_.notify_one();
-	}
-
-	std::shared_ptr<const visibility_result> result() const
-	{
-		return std::atomic_load(&published_);
-	}
-
-	worker_stats stats() const
-	{
-		std::lock_guard lock(stats_mutex_);
-		return stats_;
-	}
-
-private:
-	static visibility_player sample_player(const player_state &player)
-	{
-		return {player.eye, player.origin, player.velocity, player.mins, player.maxs, player.eye_yaw_degrees, player.rtt_seconds, player.muzzle_class};
-	}
-
-	void run()
-	{
-		for (;;)
-		{
-			snapshot current;
-			uint32_t hold_ms = 0;
-			visibility_tuning tuning;
-			{
-				std::unique_lock lock(mutex_);
-				condition_.wait(lock, [&] { return stopping_ || pending_.has_value(); });
-				if (stopping_)
-				{
-					return;
-				}
-				current = std::move(*pending_);
-				pending_.reset();
-				hold_ms = hold_ms_;
-				tuning = tuning_;
-			}
-			const auto started = std::chrono::steady_clock::now();
-			auto result = std::make_shared<visibility_result>();
-			result->sequence = current.sequence;
-			std::copy(std::begin(current.players), std::end(current.players), std::begin(result->players));
-			std::array<float, k_max_players> observer_lookahead {};
-			std::array<std::array<vec3, k_visibility_origin_count>, k_max_players> observer_origins {};
-			for (uint32_t observer = 0; observer < k_max_players; ++observer)
-			{
-				if (current.players[observer].valid)
-				{
-					observer_lookahead[observer] = visibility_effective_lookahead_seconds(current.players[observer].rtt_seconds, tuning);
-					observer_origins[observer] = visibility_origins(*data_, sample_player(current.players[observer]), tuning, observer_lookahead[observer]);
-				}
-			}
-			for (uint32_t observer = 0; observer < k_max_players; ++observer)
-			{
-				for (uint32_t target = 0; target < k_max_players; ++target)
-				{
-					result->visible[observer][target] = true;
-					const player_state &from = current.players[observer];
-					const player_state &to = current.players[target];
-					if (!from.valid || !to.valid || observer == target || from.team == to.team)
-					{
-						continue;
-					}
-					++result->evaluated_pairs;
-					bool blocked = true;
-					const auto &ray_origins = observer_origins[observer];
-					const auto ray_targets = visibility_targets(*data_, sample_player(to), tuning, observer_lookahead[observer]);
-					uint32_t ray = 0;
-					for (const vec3 &origin : ray_origins)
-					{
-						for (uint32_t point_index = 0; point_index < ray_targets.count; ++point_index)
-						{
-							const vec3 &point = ray_targets.points[point_index];
-							const ray_hit hit = segment_blocked(*data_, origin, point, cached_packets_[observer][target][ray]);
-							cached_packets_[observer][target][ray++] = hit.packet_index;
-							if (!hit.blocked)
-							{
-								blocked = false;
-								break;
-							}
-						}
-						if (!blocked)
-						{
-							break;
-						}
-					}
-					const auto now = std::chrono::steady_clock::now();
-					if (!blocked)
-					{
-						revealed_until_[observer][target] = now + std::chrono::milliseconds(hold_ms);
-					}
-					const bool visible = !blocked || now < revealed_until_[observer][target];
-					result->visible[observer][target] = visible;
-					visible ? ++result->visible_pairs : ++result->hidden_pairs;
-				}
-			}
-			result->completed = std::chrono::steady_clock::now();
-			result->worker_ms = std::chrono::duration<double, std::milli>(result->completed - started).count();
-			{
-				std::lock_guard lock(stats_mutex_);
-				stats_.latest_ms = result->worker_ms;
-				stats_.maximum_ms = std::max(stats_.maximum_ms, result->worker_ms);
-				stats_.average_ms = (stats_.average_ms * static_cast<double>(stats_.cycles) + result->worker_ms) / static_cast<double>(stats_.cycles + 1u);
-				++stats_.cycles;
-				stats_.evaluated_pairs = result->evaluated_pairs;
-				stats_.visible_pairs = result->visible_pairs;
-				stats_.hidden_pairs = result->hidden_pairs;
-			}
-			std::atomic_store(&published_, std::shared_ptr<const visibility_result>(std::move(result)));
-		}
-	}
-
-	const bvh8_data *data_ {};
-	mutable std::mutex mutex_;
-	std::condition_variable condition_;
-	std::optional<snapshot> pending_;
-	bool stopping_ {true};
-	uint32_t hold_ms_ {};
-	visibility_tuning tuning_;
-	std::thread thread_;
-	std::shared_ptr<const visibility_result> published_;
-	std::array<std::array<std::array<uint32_t, k_visibility_ray_count_max>, k_max_players>, k_max_players> cached_packets_ {};
-	std::array<std::array<std::chrono::steady_clock::time_point, k_max_players>, k_max_players> revealed_until_ {};
-	mutable std::mutex stats_mutex_;
-	worker_stats stats_;
-};
-
-struct bake_request
-{
-	std::string map;
-	map_source source;
-	std::filesystem::path game;
-	std::filesystem::path output;
-	std::filesystem::path baker;
-	std::filesystem::path vrf;
-};
-
-struct bake_completion
-{
-	bake_request request;
-	bvh8_data data;
-	std::string error;
-	bool success {};
-	bool cancelled {};
-};
-
-class automatic_baker
-{
-public:
-	~automatic_baker()
-	{
-		stop();
-	}
-
-	void start(bake_request request)
-	{
-		stop();
-		cancel_.store(false);
-		{
-			std::lock_guard lock(mutex_);
-			running_ = true;
-			map_ = request.map;
-			started_ = std::chrono::steady_clock::now();
-		}
-		thread_ = std::thread(&automatic_baker::run, this, std::move(request));
-	}
-
-	void stop()
-	{
-		cancel_.store(true);
-		if (thread_.joinable())
-		{
-			thread_.join();
-		}
-		std::lock_guard lock(mutex_);
-		running_ = false;
-		map_.clear();
-		completion_.reset();
-	}
-
-	bool poll(bake_completion &completion)
-	{
-		std::lock_guard lock(mutex_);
-		if (!completion_)
-		{
-			return false;
-		}
-		completion = std::move(*completion_);
-		completion_.reset();
-		return true;
-	}
-
-	bool status(std::string &map, double &elapsed_ms) const
-	{
-		std::lock_guard lock(mutex_);
-		if (!running_)
-		{
-			return false;
-		}
-		map = map_;
-		elapsed_ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - started_).count();
-		return true;
-	}
-
-private:
-	void run(bake_request request)
-	{
-		bake_completion completion;
-		completion.request = request;
-		process_result process;
-		std::vector<std::string> arguments {
-			"--game", request.game.string(),
-			"--map", request.map,
-			"--vpk", request.source.vpk.string(),
-			"--output", request.output.string(),
-			"--vrf", request.vrf.string(),
-			"--low-priority"
-		};
-		if (!run_process(request.baker, arguments, k_auto_bake_timeout, &cancel_, true, process, completion.error))
-		{
-			finish(std::move(completion));
-			return;
-		}
-		if (process.cancelled)
-		{
-			completion.cancelled = true;
-			finish(std::move(completion));
-			return;
-		}
-		if (process.timed_out)
-		{
-			completion.error = "automatic baker timed out";
-			finish(std::move(completion));
-			return;
-		}
-		if (process.exit_code != 0)
-		{
-			completion.error = "automatic baker exited with code " + std::to_string(process.exit_code);
-			finish(std::move(completion));
-			return;
-		}
-		if (!load_bvh8(request.output, completion.data, completion.error))
-		{
-			finish(std::move(completion));
-			return;
-		}
-		const bvh8_header &header = completion.data.header;
-		if (request.map != header.map_name || header.flags != request.source.flags
-			|| header.source_crc32 != request.source.metadata.crc32 || header.source_size != request.source.metadata.size)
-		{
-			completion.data = {};
-			completion.error = "automatic bake does not match requested map source";
-			finish(std::move(completion));
-			return;
-		}
-		completion.success = true;
-		finish(std::move(completion));
-	}
-
-	void finish(bake_completion completion)
-	{
-		std::lock_guard lock(mutex_);
-		running_ = false;
-		completion_ = std::move(completion);
-	}
-
-	std::atomic_bool cancel_ {false};
-	mutable std::mutex mutex_;
-	std::thread thread_;
-	std::optional<bake_completion> completion_;
-	std::chrono::steady_clock::time_point started_ {};
-	std::string map_;
-	bool running_ {};
-};
-
 class plugin final : public ISmmPlugin, public IMetamodListener
 {
 public:
@@ -735,7 +361,7 @@ private:
 		int recipient_slot, hide_reason reason, std::chrono::steady_clock::time_point now);
 	void record_hidden_entity(CGameEntitySystem *system, size_t member_index, int edict, const visual_entity_group &group,
 		int recipient_slot, hide_reason reason, std::chrono::steady_clock::time_point now);
-	bool capture(snapshot &value);
+	bool capture(visibility_snapshot &value);
 
 	ISmmAPI *api_ {};
 	IServerGameDLL *server_ {};
@@ -1494,7 +1120,7 @@ void plugin::change_map(const std::string &map)
 	activate(std::move(data));
 }
 
-bool plugin::capture(snapshot &value)
+bool plugin::capture(visibility_snapshot &value)
 {
 	CGameEntitySystem *system = entity_system();
 	if (system == nullptr)
@@ -1589,7 +1215,7 @@ void plugin::hook_game_frame(bool simulating, bool first_tick, bool last_tick)
 	{
 		return;
 	}
-	snapshot value;
+	visibility_snapshot value;
 	if (!capture(value))
 	{
 		disable("game entity system is unavailable");

@@ -52,12 +52,14 @@ builder.Add(baker)
 
 tests = config.cxx.Program('cs2fow_tests')
 configure(tests.compiler)
+tests.compiler.cxxincludes += [os.path.join(root, 'src', 'plugin')]
 if 'NDEBUG' in tests.compiler.defines:
   tests.compiler.defines.remove('NDEBUG')
 tests.sources += geometry + map_io + [
   os.path.join(root, 'src', 'core', 'subprocess.cpp'),
   os.path.join(root, 'src', 'core', 'visibility_sampling.cpp'),
   os.path.join(root, 'src', 'baker', 'glb_import.cpp'),
+  os.path.join(root, 'src', 'plugin', 'visibility_worker.cpp'),
   os.path.join(root, 'tests', 'tests.cpp'),
 ]
 builder.Add(tests)
@@ -80,7 +82,9 @@ plugin.sources += [
   os.path.join(root, 'src', 'core', 'subprocess.cpp'),
   os.path.join(root, 'src', 'core', 'visibility_sampling.cpp'),
   os.path.join(root, 'src', 'core', 'vpk.cpp'),
+  os.path.join(root, 'src', 'plugin', 'automatic_baker.cpp'),
   os.path.join(root, 'src', 'plugin', 'plugin.cpp'),
+  os.path.join(root, 'src', 'plugin', 'visibility_worker.cpp'),
   os.path.join(sdk['path'], 'tier1', 'convar.cpp'),
   os.path.join(sdk['path'], 'public', 'tier0', 'memoverride.cpp'),
 ]
