@@ -139,6 +139,14 @@ struct live_player
 
 using visual_entity_group = hidden_entity_group<CEntityHandle, k_max_hidden_player_entities>;
 
+struct target_transmit_cache
+{
+	CEntityInstance *pawn {};
+	visual_entity_group group;
+	visual_group_key group_key;
+	bool group_valid {};
+};
+
 enum class hide_reason : uint8_t
 {
 	current,
@@ -757,6 +765,7 @@ private:
 	std::array<std::array<pair_guard, k_max_players>, k_max_players> pair_guards_;
 	std::array<std::array<visual_entity_group, k_max_players>, k_max_players> hidden_groups_;
 	std::array<std::array<bool, k_max_players>, k_max_players> awaiting_full_update_;
+	std::array<target_transmit_cache, k_max_players> transmit_target_cache_;
 	std::mutex transmit_state_mutex_;
 	std::chrono::steady_clock::time_point last_snapshot_ {};
 	uint64_t snapshot_sequence_ {};
@@ -1634,15 +1643,29 @@ void plugin::hook_check_transmit(CCheckTransmitInfo **infos, int count, CBitVec<
 	}
 	const auto current_player_pawn = [&](uint32_t slot, const player_state &saved)
 	{
+		if (!saved.valid)
+		{
+			return static_cast<CEntityInstance *>(nullptr);
+		}
 		live_player live;
 		const lifecycle_key key = player_lifecycle(slot, system, &live);
-		if (!saved.valid || live.pawn == nullptr || !lifecycle_allows_hiding(lifecycle_[slot], now)
+		if (live.pawn == nullptr || !lifecycle_allows_hiding(lifecycle_[slot], now)
 			|| lifecycle_changed(lifecycle_[slot].key, key) || key.pawn_entity != saved.pawn_entity || key.team != saved.team)
 		{
 			return static_cast<CEntityInstance *>(nullptr);
 		}
 		return live.pawn;
 	};
+	for (uint32_t target = 0; target < k_max_players; ++target)
+	{
+		target_transmit_cache &cache = transmit_target_cache_[target];
+		cache.pawn = current_player_pawn(target, result->players[target]);
+		cache.group_valid = cache.pawn != nullptr && collect_player_visual_group(system, cache.pawn, cache.group);
+		if (cache.group_valid)
+		{
+			cache.group_key = make_current_visual_group_key(cache.group);
+		}
+	}
 	for (int i = 0; i < count; ++i)
 	{
 		CCheckTransmitInfo *info = infos[i];
@@ -1658,39 +1681,33 @@ void plugin::hook_check_transmit(CCheckTransmitInfo **infos, int count, CBitVec<
 			continue;
 		}
 		const player_state &observer = result->players[slot];
-		if (current_player_pawn(static_cast<uint32_t>(slot), observer) == nullptr)
+		if (transmit_target_cache_[slot].pawn == nullptr)
 		{
 			continue;
 		}
 		for (uint32_t target = 0; target < k_max_players; ++target)
 		{
 			const player_state &player = result->players[target];
+			const target_transmit_cache &cache = transmit_target_cache_[target];
 			visual_entity_group &stored_group = hidden_groups_[slot][target];
 			if (stored_group.count != 0 && now >= stored_group.quarantine_until)
 			{
 				hidden_group_clear(stored_group);
 			}
-			if (!player.valid || player.team == observer.team)
-			{
-				continue;
-			}
-			CEntityInstance *current_pawn = current_player_pawn(target, player);
-			if (current_pawn == nullptr)
+			if (!player.valid || player.team == observer.team || cache.pawn == nullptr)
 			{
 				continue;
 			}
 			pair_guard &guard = pair_guards_[slot][target];
-			visual_entity_group current_group;
-			const bool current_group_valid = collect_player_visual_group(system, current_pawn, current_group);
-			const bool full_group_marked = current_group_valid && group_fully_marked(system, info->m_pTransmitEntity, current_group);
-			if (current_group_valid)
+			const bool full_group_marked = cache.group_valid && group_fully_marked(system, info->m_pTransmitEntity, cache.group);
+			if (cache.group_valid)
 			{
-				update_pair_visual_group(guard, make_current_visual_group_key(current_group), now, k_pair_baseline_warmup);
+				update_pair_visual_group(guard, cache.group_key, now, k_pair_baseline_warmup);
 			}
-			if (awaiting_full_update_[slot][target] && current_group_valid)
+			if (awaiting_full_update_[slot][target] && cache.group_valid)
 			{
-				hidden_group_store(stored_group, current_group, now, k_hidden_entity_quarantine);
-				clear_group(system, info->m_pTransmitEntity, current_group, slot, hide_reason::current, now);
+				hidden_group_store(stored_group, cache.group, now, k_hidden_entity_quarantine);
+				clear_group(system, info->m_pTransmitEntity, cache.group, slot, hide_reason::current, now);
 				continue;
 			}
 			if (result->visible[slot][target])
@@ -1711,7 +1728,7 @@ void plugin::hook_check_transmit(CCheckTransmitInfo **infos, int count, CBitVec<
 				}
 				continue;
 			}
-			if (!current_group_valid)
+			if (!cache.group_valid)
 			{
 				if (hidden_group_quarantined(stored_group, now))
 				{
@@ -1719,9 +1736,9 @@ void plugin::hook_check_transmit(CCheckTransmitInfo **infos, int count, CBitVec<
 				}
 				continue;
 			}
-			hidden_group_store(stored_group, current_group, now, k_hidden_entity_quarantine);
+			hidden_group_store(stored_group, cache.group, now, k_hidden_entity_quarantine);
 			awaiting_full_update_[slot][target] = true;
-			clear_group(system, info->m_pTransmitEntity, current_group, slot, hide_reason::current, now);
+			clear_group(system, info->m_pTransmitEntity, cache.group, slot, hide_reason::current, now);
 		}
 	}
 }
