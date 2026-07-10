@@ -30,7 +30,7 @@ struct lifecycle_guard
 	bool initialized {};
 };
 
-inline constexpr size_t k_pair_visual_group_key_max = 128;
+inline constexpr size_t k_pair_visual_group_key_max = 132;
 
 struct visual_group_key
 {
