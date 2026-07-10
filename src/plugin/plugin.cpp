@@ -1528,8 +1528,13 @@ bool plugin::capture(snapshot &value)
 	{
 		for (uint32_t target = 0; target < k_max_players; ++target)
 		{
-			update_pair_guard(pair_guards_[observer][target], keys[observer], stable_slots[observer],
-				keys[target], stable_slots[target], now, k_pair_baseline_warmup);
+			if (update_pair_guard(pair_guards_[observer][target], keys[observer], stable_slots[observer],
+				keys[target], stable_slots[target], now, k_pair_baseline_warmup)
+				&& (awaiting_full_update_[observer][target] || hidden_groups_[observer][target].count != 0))
+			{
+				awaiting_full_update_[observer][target] = false;
+				hidden_group_clear(hidden_groups_[observer][target]);
+			}
 		}
 	}
 	return true;

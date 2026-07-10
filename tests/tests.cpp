@@ -446,7 +446,8 @@ void test_pair_guard()
 	target.team = 3;
 
 	pair_guard guard;
-	update_pair_guard(guard, observer, true, target, true, start, warmup);
+	assert(update_pair_guard(guard, observer, true, target, true, start, warmup));
+	assert(!update_pair_guard(guard, observer, true, target, true, start, warmup));
 	assert(!pair_allows_hiding(guard, start + std::chrono::milliseconds(1499), 1));
 	pair_note_open(guard, start + std::chrono::milliseconds(1499), 1);
 	assert(!pair_allows_hiding(guard, start + std::chrono::milliseconds(1500), 1));
@@ -473,7 +474,7 @@ void test_pair_guard()
 
 	lifecycle_key changed = target;
 	changed.team = 2;
-	update_pair_guard(guard, observer, true, changed, true, start + std::chrono::milliseconds(2000), warmup);
+	assert(update_pair_guard(guard, observer, true, changed, true, start + std::chrono::milliseconds(2000), warmup));
 	assert(!pair_allows_hiding(guard, start + std::chrono::milliseconds(3499), 3));
 	pair_note_open(guard, start + std::chrono::milliseconds(3500), 3);
 	assert(!pair_allows_hiding(guard, start + std::chrono::milliseconds(3500), 3));
@@ -481,12 +482,12 @@ void test_pair_guard()
 
 	lifecycle_key dead = changed;
 	dead.alive = false;
-	update_pair_guard(guard, observer, true, dead, false, start + std::chrono::milliseconds(4000), warmup);
-	update_pair_guard(guard, observer, true, dead, false, start + std::chrono::milliseconds(4500), warmup);
+	assert(update_pair_guard(guard, observer, true, dead, false, start + std::chrono::milliseconds(4000), warmup));
+	assert(update_pair_guard(guard, observer, true, dead, false, start + std::chrono::milliseconds(4500), warmup));
 	pair_note_open(guard, start + std::chrono::milliseconds(5999), 5);
 	assert(!pair_allows_hiding(guard, start + std::chrono::milliseconds(5999), 6));
 
-	update_pair_guard(guard, observer, true, changed, true, start + std::chrono::milliseconds(6000), warmup);
+	assert(update_pair_guard(guard, observer, true, changed, true, start + std::chrono::milliseconds(6000), warmup));
 	assert(!pair_allows_hiding(guard, start + std::chrono::milliseconds(7499), 7));
 	pair_note_open(guard, start + std::chrono::milliseconds(7500), 7);
 	assert(!pair_allows_hiding(guard, start + std::chrono::milliseconds(7500), 7));
