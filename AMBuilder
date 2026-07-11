@@ -61,6 +61,7 @@ if 'NDEBUG' in tests.compiler.defines:
   tests.compiler.defines.remove('NDEBUG')
 tests.sources += geometry + map_io + [
   os.path.join(root, 'src', 'core', 'subprocess.cpp'),
+  os.path.join(root, 'src', 'core', 'smoke_occlusion.cpp'),
   os.path.join(root, 'src', 'core', 'visibility_sampling.cpp'),
   os.path.join(root, 'src', 'baker', 'glb_import.cpp'),
   os.path.join(root, 'src', 'plugin', 'visibility_worker.cpp'),
@@ -87,6 +88,7 @@ plugin.sources += [
   os.path.join(root, 'src', 'core', 'bvh8_format.cpp'),
   os.path.join(root, 'src', 'core', 'map_source.cpp'),
   os.path.join(root, 'src', 'core', 'subprocess.cpp'),
+  os.path.join(root, 'src', 'core', 'smoke_occlusion.cpp'),
   os.path.join(root, 'src', 'core', 'visibility_sampling.cpp'),
   os.path.join(root, 'src', 'core', 'vpk.cpp'),
   os.path.join(root, 'src', 'plugin', 'automatic_baker.cpp'),

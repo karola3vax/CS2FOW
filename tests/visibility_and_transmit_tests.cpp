@@ -6,6 +6,7 @@
 
 #include "builder.h"
 #include "lifecycle_guard.h"
+#include "smoke_occlusion.h"
 #include "transmit_debug.h"
 #include "transmit_masks.h"
 #include "visibility_sampling.h"
@@ -16,8 +17,10 @@
 #include <cassert>
 #include <chrono>
 #include <cmath>
+#include <cstring>
 #include <initializer_list>
 #include <iostream>
+#include <limits>
 #include <memory>
 #include <random>
 #include <thread>
@@ -66,6 +69,86 @@ visual_group_key test_visual_key(std::initializer_list<uint32_t> handles)
 		values[count++] = handle;
 	}
 	return make_visual_group_key(values, count);
+}
+
+uint32_t test_morton(uint32_t x, uint32_t y, uint32_t z)
+{
+	uint32_t result = 0;
+	for (uint32_t bit = 0; bit < 5; ++bit)
+	{
+		result |= ((x >> bit) & 1u) << (bit * 3u);
+		result |= ((y >> bit) & 1u) << (bit * 3u + 1u);
+		result |= ((z >> bit) & 1u) << (bit * 3u + 2u);
+	}
+	return result;
+}
+
+void test_smoke_occlusion()
+{
+	smoke_snapshot smoke;
+	smoke.volumes.reserve(2);
+	smoke.volumes.emplace_back();
+	smoke_volume_snapshot &volume = smoke.volumes.back();
+	volume.age_seconds = 2.0f;
+	volume.density.fill(50.0f);
+	assert(smoke_line_blocked(smoke, {-100, 0, 0}, {100, 0, 0}));
+	assert(smoke_line_blocked(smoke, {100, 0, 0}, {-100, 0, 0}));
+	assert(!smoke_line_blocked(smoke, {400, 0, 0}, {500, 0, 0}));
+
+	volume.density.fill(5.0f);
+	assert(!smoke_line_blocked(smoke, {-100, 0, 0}, {100, 0, 0}));
+	volume.density.fill(5.5f);
+	assert(!smoke_line_blocked(smoke, {0, 0, 0}, {1, 0, 0}));
+	assert(smoke_line_blocked(smoke, {-100, 0, 0}, {100, 0, 0}));
+	volume.density.fill(0.0f);
+	volume.density[test_morton(16, 16, 16)] = 40.0f;
+	assert(smoke_line_blocked(smoke, {0, 0, 0}, {1, 0, 0}));
+	volume.density.fill(0.0f);
+	volume.opaque_cells[test_morton(16, 16, 16) >> 3u] = static_cast<uint8_t>(1u << (test_morton(16, 16, 16) & 7u));
+	assert(smoke_line_blocked(smoke, {0, 0, 0}, {1, 0, 0}));
+
+	volume.opaque_cells.fill(0);
+	volume.density.fill(5.5f);
+	smoke.volumes.push_back(volume);
+	assert(smoke_line_blocked(smoke, {0, 0, 0}, {1, 0, 0}));
+	smoke.volumes.resize(1);
+	volume = smoke.volumes.front();
+	volume.density.fill(50.0f);
+	volume.age_seconds = 0.1f;
+	assert(!smoke_line_blocked(smoke, {-100, 0, 0}, {100, 0, 0}));
+	volume.age_seconds = 1.5f;
+	assert(smoke_line_blocked(smoke, {-100, 0, 0}, {100, 0, 0}));
+	volume.age_seconds = 17.0f;
+	assert(smoke_line_blocked(smoke, {-100, 0, 0}, {100, 0, 0}));
+	volume.age_seconds = 21.9f;
+	assert(!smoke_line_blocked(smoke, {-100, 0, 0}, {100, 0, 0}));
+
+	std::vector<std::byte> storage(k_smoke_storage_density_offset + 2u * k_smoke_storage_frame_stride);
+	storage[k_smoke_storage_mask_offset] = std::byte {1};
+	const float first = 12.5f;
+	const float second = 25.0f;
+	std::memcpy(storage.data() + k_smoke_storage_density_offset, &first, sizeof(first));
+	std::memcpy(storage.data() + k_smoke_storage_density_offset + k_smoke_storage_frame_stride, &second, sizeof(second));
+	smoke_volume_snapshot copied;
+	assert(copy_smoke_frame(storage.data(), 0, {1, 2, 3}, 2.0f, copied));
+	assert(copied.center.x == 1.0f && copied.opaque_cells[0] == 1 && copied.density[0] == first);
+	assert(copy_smoke_frame(storage.data(), 1, {1, 2, 3}, 2.0f, copied));
+	assert(copied.density[0] == second);
+	assert(!copy_smoke_frame(storage.data(), 2, {}, 2.0f, copied));
+	int frame_reads = 0;
+	assert(copy_stable_smoke_frame(storage.data(), {}, 2.0f, copied, [&]
+	{
+		return frame_reads++ == 0 ? 0 : 1;
+	}));
+	assert(frame_reads == 4 && copied.density[0] == second);
+	frame_reads = 0;
+	assert(!copy_stable_smoke_frame(storage.data(), {}, 2.0f, copied, [&]
+	{
+		return frame_reads++ & 1;
+	}));
+	const float invalid = std::numeric_limits<float>::quiet_NaN();
+	std::memcpy(storage.data() + k_smoke_storage_density_offset, &invalid, sizeof(invalid));
+	assert(!copy_smoke_frame(storage.data(), 0, {}, 2.0f, copied));
 }
 
 void test_visibility_sampling()
@@ -316,6 +399,40 @@ void test_visibility_worker()
 	assert(worker->stats().cycles == 4);
 	worker->start(&wall);
 	assert(worker->stats().cycles == 0);
+	worker->stop();
+
+	const bvh8_data open = test_world({{{10000, 10000, 10000}, {10001, 10000, 10000}, {10000, 10001, 10000}}});
+	worker->start(&open);
+	auto smokes = std::make_shared<smoke_snapshot>();
+	smokes->volumes.emplace_back();
+	smokes->volumes.back().age_seconds = 2.0f;
+	smokes->volumes.back().density.fill(50.0f);
+	value.sequence = 5;
+	value.captured = std::chrono::steady_clock::now();
+	value.players[0] = {true, 2, {0, 0, 64}, {0, 0, 0}, {}, {-16, -16, 0}, {16, 16, 72}};
+	value.players[1] = {true, 3, {64, 0, 64}, {64, 0, 0}, {200, 0, 0}, {-16, -16, 0}, {16, 16, 72}};
+	value.smoke_enabled = true;
+	value.smoke_available = true;
+	value.smokes = smokes;
+	worker->submit(value, 0, {75, 1.5f, 375, 96.0f, 24.0f, 0.64f, 128.0f});
+	result = wait_for(5);
+	assert(result && !result->visible[0][1] && result->smoke_count == 1);
+	smokes->volumes.back().density.fill(0.0f);
+	for (uint32_t x = 16; x < 20; ++x)
+	{
+		const uint32_t cell = test_morton(x, 16, 19);
+		smokes->volumes.back().opaque_cells[cell >> 3u] |= static_cast<uint8_t>(1u << (cell & 7u));
+	}
+	assert(smoke_line_blocked(*smokes, {0, 0, 64}, {64, 0, 64}));
+	value.sequence = 6;
+	worker->submit(value, 0, {75, 1.5f, 375, 96.0f, 24.0f, 0.64f, 128.0f});
+	result = wait_for(6);
+	assert(result && result->visible[0][1]);
+	value.sequence = 7;
+	value.smoke_available = false;
+	worker->submit(value, 0, {75, 1.5f, 375, 96.0f, 24.0f, 0.64f, 128.0f});
+	result = wait_for(7);
+	assert(result && result->visible[0][1]);
 	worker->stop();
 }
 
@@ -598,6 +715,15 @@ double benchmark_worker_loop(const bvh8_data &data, const std::string &label)
 			weapon_muzzle_class::rifle
 		};
 	}
+	smoke_snapshot smoke;
+	smoke.volumes.emplace_back();
+	smoke.volumes.back().center = {
+		(data.header.world_min[0] + data.header.world_max[0]) * 0.5f,
+		(data.header.world_min[1] + data.header.world_max[1]) * 0.5f,
+		(data.header.world_min[2] + data.header.world_max[2]) * 0.5f
+	};
+	smoke.volumes.back().age_seconds = 2.0f;
+	smoke.volumes.back().density.fill(50.0f);
 
 	std::vector<uint32_t> cache(k_players * k_players * k_visibility_ray_count_max, k_invalid_ref);
 	std::array<double, 20> timings {};
@@ -632,7 +758,7 @@ double benchmark_worker_loop(const bvh8_data &data, const std::string &label)
 						const ray_hit hit = segment_blocked(data, origin, point, cached);
 						cached = hit.packet_index;
 						++ray;
-						if (!hit.blocked)
+						if (!hit.blocked && !smoke_line_blocked(smoke, origin, point))
 						{
 							blocked = false;
 							break;
@@ -660,6 +786,7 @@ double benchmark_worker_loop(const bvh8_data &data, const std::string &label)
 
 void run_visibility_and_transmit_tests()
 {
+	test_smoke_occlusion();
 	test_visibility_sampling();
 	test_visibility_worker();
 	test_lifecycle_guard();

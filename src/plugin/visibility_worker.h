@@ -5,6 +5,7 @@
 // CS2 objects. New pending work replaces old pending work instead of queuing.
 
 #include "bvh8.h"
+#include "smoke_occlusion.h"
 #include "visibility_sampling.h"
 
 #include <array>
@@ -40,6 +41,9 @@ struct visibility_snapshot
 {
 	uint64_t sequence {};
 	std::chrono::steady_clock::time_point captured;
+	bool smoke_enabled {};
+	bool smoke_available {};
+	std::shared_ptr<const smoke_snapshot> smokes;
 	player_state players[k_max_players];
 };
 
@@ -50,6 +54,9 @@ struct visibility_result
 	std::chrono::steady_clock::time_point completed;
 	player_state players[k_max_players];
 	float recipient_lookahead_seconds[k_max_players] {};
+	bool smoke_enabled {};
+	bool smoke_available {};
+	uint32_t smoke_count {};
 	bool visible[k_max_players][k_max_players] {};
 	double worker_ms {};
 	uint32_t evaluated_pairs {};

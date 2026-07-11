@@ -30,6 +30,7 @@
 #include <filesystem>
 #include <fstream>
 #include <mutex>
+#include <limits>
 #include <sstream>
 #include <string>
 #include <string_view>
@@ -49,6 +50,7 @@ void on_cs2fow_enable_changed(CConVar<bool> *, CSplitScreenSlot, const bool *new
 }
 
 CConVar<bool> cs2fow_enable("cs2fow_enable", FCVAR_NONE, "Enable CS2FOW when map data is valid", true, on_cs2fow_enable_changed);
+CConVar<bool> cs2fow_smoke_occlusion("cs2fow_smoke_occlusion", FCVAR_NONE, "Use live CS2 smoke for visibility", true, on_cs2fow_enable_changed);
 CConVar<int> cs2fow_update_interval_ms("cs2fow_update_interval_ms", FCVAR_NONE, "Visibility worker update interval", 1, true, 1, true, 250);
 CConVar<int> cs2fow_base_lookahead_ms("cs2fow_base_lookahead_ms", FCVAR_NONE, "Fixed movement lookahead before recipient RTT", 75, true, 0, true, 500);
 CConVar<float> cs2fow_rtt_lookahead_scale("cs2fow_rtt_lookahead_scale", FCVAR_NONE, "Recipient RTT multiplier for movement lookahead", 1.5f, true, 0.0f, true, 4.0f);
@@ -131,6 +133,10 @@ bool plugin::Load(PluginId id, ISmmAPI *ismm, char *error, size_t maxlen, bool l
 		disable(avx ? reason : "AVX and OS AVX state are required");
 		META_CONPRINTF("[CS2FOW] disabled: %s\n", disabled_reason_.c_str());
 	}
+	else if (!smoke_gamedata_available_ || !smoke_schema_available_)
+	{
+		META_CONPRINTF("[CS2FOW] smoke occlusion unavailable; wall filtering remains active\n");
+	}
 	META_CONPRINTF("[CS2FOW] loaded; culling is fail-open until a map bake validates\n");
 	return true;
 }
@@ -181,14 +187,26 @@ bool plugin::read_gamedata(std::string &error)
 	recipient_slot_offset_ = 0;
 	entity_system_offset_ = 0;
 	transmit_offsets_ = {};
+	smoke_layout_ = {};
+	smoke_gamedata_available_ = true;
 #if defined(_WIN32)
 	constexpr std::string_view k_recipient_key = "recipient_slot_offset_windows";
 	constexpr std::string_view k_entity_system_key = "game_entity_system_offset_windows";
 	constexpr std::string_view k_full_update_key = "checktransmit_full_update_offset_windows";
+	constexpr std::string_view k_smoke_volume_key = "smoke_volume_offset_windows";
+	constexpr std::string_view k_smoke_storage_key = "smoke_storage_offset_windows";
+	constexpr std::string_view k_smoke_frame_key = "smoke_frame_offset_windows";
+	constexpr std::string_view k_smoke_center_key = "smoke_center_offset_windows";
+	constexpr std::string_view k_smoke_start_time_key = "smoke_start_time_offset_windows";
 #else
 	constexpr std::string_view k_recipient_key = "recipient_slot_offset_linux";
 	constexpr std::string_view k_entity_system_key = "game_entity_system_offset_linux";
 	constexpr std::string_view k_full_update_key = "checktransmit_full_update_offset_linux";
+	constexpr std::string_view k_smoke_volume_key = "smoke_volume_offset_linux";
+	constexpr std::string_view k_smoke_storage_key = "smoke_storage_offset_linux";
+	constexpr std::string_view k_smoke_frame_key = "smoke_frame_offset_linux";
+	constexpr std::string_view k_smoke_center_key = "smoke_center_offset_linux";
+	constexpr std::string_view k_smoke_start_time_key = "smoke_start_time_offset_linux";
 #endif
 	std::string line;
 	while (std::getline(stream, line))
@@ -199,7 +217,9 @@ bool plugin::read_gamedata(std::string &error)
 			continue;
 		}
 		const std::string key = line.substr(0, equals);
-		if (key != k_recipient_key && key != k_entity_system_key && key != k_full_update_key)
+		const bool smoke_key = key == k_smoke_volume_key || key == k_smoke_storage_key || key == k_smoke_frame_key
+			|| key == k_smoke_center_key || key == k_smoke_start_time_key;
+		if (key != k_recipient_key && key != k_entity_system_key && key != k_full_update_key && !smoke_key)
 		{
 			continue;
 		}
@@ -207,12 +227,22 @@ bool plugin::read_gamedata(std::string &error)
 		uint32_t value {};
 		if (!parse_gamedata_uint32(text, value))
 		{
+			if (smoke_key)
+			{
+				smoke_gamedata_available_ = false;
+				continue;
+			}
 			error = "invalid gamedata value for " + key;
 			return false;
 		}
 		if (key == k_recipient_key) recipient_slot_offset_ = value;
 		if (key == k_entity_system_key) entity_system_offset_ = value;
 		if (key == k_full_update_key) transmit_offsets_.full_update_offset = value;
+		if (key == k_smoke_volume_key) smoke_layout_.volume = value;
+		if (key == k_smoke_storage_key) smoke_layout_.storage = value;
+		if (key == k_smoke_frame_key) smoke_layout_.frame = value;
+		if (key == k_smoke_center_key) smoke_layout_.center = value;
+		if (key == k_smoke_start_time_key) smoke_layout_.start_time = value;
 	}
 	if (recipient_slot_offset_ == 0 || entity_system_offset_ == 0 || transmit_offsets_.full_update_offset == 0)
 	{
@@ -226,6 +256,12 @@ bool plugin::read_gamedata(std::string &error)
 		error = "gamedata contains invalid offsets for this platform";
 		return false;
 	}
+	smoke_gamedata_available_ = smoke_gamedata_available_
+		&& valid_gamedata_offset(smoke_layout_.volume, static_cast<uint32_t>(alignof(void *)), k_max_gamedata_offset)
+		&& valid_gamedata_offset(smoke_layout_.storage, static_cast<uint32_t>(alignof(void *)), k_max_gamedata_offset)
+		&& valid_gamedata_offset(smoke_layout_.frame, static_cast<uint32_t>(alignof(int32_t)), k_max_gamedata_offset)
+		&& valid_gamedata_offset(smoke_layout_.center, static_cast<uint32_t>(alignof(float)), k_max_gamedata_offset)
+		&& valid_gamedata_offset(smoke_layout_.start_time, static_cast<uint32_t>(alignof(float)), k_max_gamedata_offset);
 	return true;
 }
 
@@ -433,7 +469,9 @@ void plugin::hook_game_frame(bool simulating, bool first_tick, bool last_tick)
 		return;
 	}
 	visibility_snapshot value;
-	if (!capture(value))
+	CGlobalVars *globals = network_server->GetGlobals();
+	const float game_time = globals == nullptr ? std::numeric_limits<float>::quiet_NaN() : globals->curtime;
+	if (!capture(value, game_time))
 	{
 		disable("game entity system is unavailable");
 		return;
@@ -462,6 +500,9 @@ void plugin::print_status() const
 	META_CONPRINTF("[CS2FOW] worker latest=%.3fms average=%.3fms maximum=%.3fms snapshot_age=%.1fms pairs=%u visible=%u hidden=%u cycles=%llu\n",
 		stats.latest_ms, stats.average_ms, stats.maximum_ms, age_ms, stats.evaluated_pairs, stats.visible_pairs, stats.hidden_pairs,
 		static_cast<unsigned long long>(stats.cycles));
+	const bool smoke_available = result != nullptr ? result->smoke_available : smoke_gamedata_available_ && smoke_schema_available_;
+	META_CONPRINTF("[CS2FOW] smoke enabled=%d available=%d captured=%u\n", cs2fow_smoke_occlusion.Get() ? 1 : 0,
+		smoke_available ? 1 : 0, result == nullptr ? 0u : result->smoke_count);
 	std::string bake_map;
 	double bake_elapsed_ms = 0;
 	if (automatic_baker_.status(bake_map, bake_elapsed_ms))

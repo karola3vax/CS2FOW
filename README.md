@@ -51,7 +51,7 @@ It reduces radar cheats that depend on live enemy entity positions. It does not 
 
 ### What about smokes, doors, breakables, and moving props?
 
-They are not visibility blockers in the current preview. CS2FOW checks baked static map geometry only.
+Smokes are visibility blockers. CS2FOW copies CS2's live smoke voxel grid and checks wall-clear rays against it, including changing edges, overlap, growth, fade, and grenade-made holes. Doors, breakables, and moving props are not blockers in the current preview because the baked map contains only static geometry.
 
 ### How does it avoid enemies appearing too late around corners?
 
@@ -136,6 +136,7 @@ Defaults in `cfg/cs2fow.cfg` are:
 | Setting | Default | Meaning |
 | --- | ---: | --- |
 | `cs2fow_enable` | `1` | Enable filtering when all required data is valid. |
+| `cs2fow_smoke_occlusion` | `1` | Use CS2's live smoke grid. Smoke alone fails open if private smoke data is unavailable. |
 | `cs2fow_update_interval_ms` | `1` | Minimum time between player snapshots sent to the worker. |
 | `cs2fow_base_lookahead_ms` | `75` | Fixed movement lookahead before the RTT contribution. |
 | `cs2fow_rtt_lookahead_scale` | `1.5` | Multiplier applied to the recipient's current round-trip latency. |
@@ -153,7 +154,7 @@ Automatic baking needs write access to `addons/cs2fow/data/maps`. On Linux, the 
 
 ## Status and debug commands
 
-`cs2fow_status` prints whether the plugin is active, why it is fail open when inactive, map and bake details, worker timings, true snapshot age, pair counts, and automatic-bake progress.
+`cs2fow_status` prints whether the plugin is active, why it is fail open when inactive, map and bake details, worker timings, true snapshot age, pair counts, smoke availability and count, and automatic-bake progress.
 
 `cs2fow_debug 1` starts silent evidence collection. It adds a record only when CS2FOW found a primary transmit bit set immediately before clearing it. It does not print every clear.
 

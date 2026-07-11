@@ -156,6 +156,7 @@ bool plugin::resolve_schema(std::string &error)
 	const bool owner_effect_schema_available =
 		optional(fields_.owner_entity, "CBaseEntity", "m_hOwnerEntity")
 		&& optional(fields_.effect_entity, "CBaseEntity", "m_hEffectEntity");
+	smoke_schema_available_ = optional(fields_.did_smoke_effect, "CSmokeGrenadeProjectile", "m_bDidSmokeEffect");
 	if (!error.empty())
 	{
 		error = "missing schema fields: " + error;
@@ -256,10 +257,13 @@ weapon_muzzle_class plugin::active_weapon_muzzle_class(CGameEntitySystem *system
 	return weapon_muzzle_class_from_item_definition(definition);
 }
 
-void plugin::refresh_aux_visual_cache(CGameEntitySystem *system)
+void plugin::refresh_entity_caches(CGameEntitySystem *system,
+	std::array<CEntityInstance *, k_max_smoke_volumes> &smokes, size_t &smoke_count, bool &smoke_overflow)
 {
 	aux_visual_count_ = 0;
-	if (system == nullptr || !owner_effect_schema_available_)
+	smoke_count = 0;
+	smoke_overflow = false;
+	if (system == nullptr)
 	{
 		return;
 	}
@@ -272,6 +276,24 @@ void plugin::refresh_aux_visual_cache(CGameEntitySystem *system)
 		{
 			continue;
 		}
+		const char *classname = entity != nullptr && entity->m_pEntity != nullptr ? entity->m_pEntity->GetClassname() : nullptr;
+		if (smoke_schema_available_ && smoke_gamedata_available_ && classname != nullptr
+			&& std::strcmp(classname, "smokegrenade_projectile") == 0
+			&& field<bool>(entity, fields_.did_smoke_effect))
+		{
+			if (smoke_count < smokes.size())
+			{
+				smokes[smoke_count++] = entity;
+			}
+			else
+			{
+				smoke_overflow = true;
+			}
+		}
+		if (!owner_effect_schema_available_)
+		{
+			continue;
+		}
 		const CEntityHandle child = entity_handle(entity);
 		const CEntityHandle owner = field<CEntityHandle>(entity, fields_.owner_entity);
 		const CEntityHandle effect = field<CEntityHandle>(entity, fields_.effect_entity);
@@ -281,7 +303,7 @@ void plugin::refresh_aux_visual_cache(CGameEntitySystem *system)
 		}
 		if (aux_visual_count_ >= aux_visual_entities_.size())
 		{
-			break;
+			continue;
 		}
 		aux_visual_entity &record = aux_visual_entities_[aux_visual_count_++];
 		record.child = child;
@@ -290,6 +312,37 @@ void plugin::refresh_aux_visual_cache(CGameEntitySystem *system)
 		record.edict = edict;
 		copy_entity_name(entity, record.name);
 	}
+}
+
+bool plugin::capture_smokes(const std::array<CEntityInstance *, k_max_smoke_volumes> &entities, size_t count,
+	bool overflow, float game_time, visibility_snapshot &value) const
+{
+	if (overflow || !std::isfinite(game_time))
+	{
+		return false;
+	}
+	auto snapshot = std::make_shared<smoke_snapshot>();
+	snapshot->volumes.reserve(count);
+	for (size_t index = 0; index < count; ++index)
+	{
+		CEntityInstance *entity = entities[index];
+		if (entity == nullptr)
+		{
+			return false;
+		}
+		auto *volume = reinterpret_cast<std::byte *>(entity) + smoke_layout_.volume;
+		const vec3 center = to_vec3(field<Vector>(volume, smoke_layout_.center));
+		const float start_time = field<float>(volume, smoke_layout_.start_time);
+		const auto *storage = field<std::byte *>(volume, smoke_layout_.storage);
+		snapshot->volumes.emplace_back();
+		if (!copy_stable_smoke_frame(storage, center, game_time - start_time, snapshot->volumes.back(),
+			[&] { return field<int32_t>(volume, smoke_layout_.frame); }))
+		{
+			return false;
+		}
+	}
+	value.smokes = std::move(snapshot);
+	return true;
 }
 
 bool plugin::collect_player_visual_group(CGameEntitySystem *system, CEntityInstance *pawn_entity, visual_entity_group &group) const
@@ -362,7 +415,7 @@ bool plugin::collect_player_visual_group(CGameEntitySystem *system, CEntityInsta
 	return group.count != 0;
 }
 
-bool plugin::capture(visibility_snapshot &value)
+bool plugin::capture(visibility_snapshot &value, float game_time)
 {
 	CGameEntitySystem *system = entity_system();
 	if (system == nullptr)
@@ -374,8 +427,21 @@ bool plugin::capture(visibility_snapshot &value)
 	const auto now = value.captured;
 	std::array<lifecycle_key, k_max_players> keys;
 	std::array<bool, k_max_players> stable_slots {};
-	std::lock_guard<std::mutex> lock(transmit_state_mutex_);
-	refresh_aux_visual_cache(system);
+	std::array<CEntityInstance *, k_max_smoke_volumes> smoke_entities {};
+	size_t smoke_count = 0;
+	bool smoke_overflow = false;
+	std::unique_lock<std::mutex> lock(transmit_state_mutex_);
+	refresh_entity_caches(system, smoke_entities, smoke_count, smoke_overflow);
+	lock.unlock();
+	value.smoke_enabled = cs2fow_smoke_occlusion.Get();
+	value.smoke_available = smoke_schema_available_ && smoke_gamedata_available_;
+	if (value.smoke_enabled && value.smoke_available
+		&& !capture_smokes(smoke_entities, smoke_count, smoke_overflow, game_time, value))
+	{
+		value.smoke_available = false;
+		value.smokes.reset();
+	}
+	lock.lock();
 	for (uint32_t slot = 0; slot < k_max_players; ++slot)
 	{
 		live_player live;

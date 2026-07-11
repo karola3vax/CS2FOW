@@ -89,6 +89,16 @@ struct schema_offsets
 	uint32_t carried_hostage_prop {};
 	uint32_t owner_entity {};
 	uint32_t effect_entity {};
+	uint32_t did_smoke_effect {};
+};
+
+struct smoke_private_layout
+{
+	uint32_t volume {};
+	uint32_t storage {};
+	uint32_t frame {};
+	uint32_t center {};
+	uint32_t start_time {};
 };
 
 struct live_player
@@ -178,14 +188,17 @@ private:
 	CEntityInstance *pawn(CEntityInstance *controller) const;
 	lifecycle_key player_lifecycle(uint32_t slot, CGameEntitySystem *system, live_player *live) const;
 	weapon_muzzle_class active_weapon_muzzle_class(CGameEntitySystem *system, CEntityInstance *pawn) const;
-	void refresh_aux_visual_cache(CGameEntitySystem *system);
+	void refresh_entity_caches(CGameEntitySystem *system,
+		std::array<CEntityInstance *, k_max_smoke_volumes> &smokes, size_t &smoke_count, bool &smoke_overflow);
 	bool collect_player_visual_group(CGameEntitySystem *system, CEntityInstance *pawn, visual_entity_group &group) const;
 	bool group_fully_marked(CGameEntitySystem *system, CBitVec<MAX_EDICTS> *bits, const visual_entity_group &group) const;
 	void clear_group(CGameEntitySystem *system, CBitVec<MAX_EDICTS> *bits, const visual_entity_group &group,
 		int recipient_slot, hide_reason reason, std::chrono::steady_clock::time_point now);
 	void record_hidden_entity(CGameEntitySystem *system, size_t member_index, int edict, const visual_entity_group &group,
 		int recipient_slot, hide_reason reason, std::chrono::steady_clock::time_point now);
-	bool capture(visibility_snapshot &value);
+	bool capture(visibility_snapshot &value, float game_time);
+	bool capture_smokes(const std::array<CEntityInstance *, k_max_smoke_volumes> &entities, size_t count,
+		bool overflow, float game_time, visibility_snapshot &value) const;
 
 	ISmmAPI *api_ {};
 	IServerGameDLL *server_ {};
@@ -199,6 +212,7 @@ private:
 	uint32_t recipient_slot_offset_ {};
 	uint32_t entity_system_offset_ {};
 	checktransmit_private_offsets transmit_offsets_;
+	smoke_private_layout smoke_layout_;
 	int game_frame_hook_id_ {};
 	int check_transmit_hook_id_ {};
 	std::string map_;
@@ -209,6 +223,8 @@ private:
 	automatic_baker automatic_baker_;
 	bool weapon_item_schema_available_ {};
 	bool owner_effect_schema_available_ {};
+	bool smoke_schema_available_ {};
+	bool smoke_gamedata_available_ {};
 	std::array<aux_visual_entity, k_max_aux_visual_cache_entities> aux_visual_entities_;
 	size_t aux_visual_count_ {};
 	recent_hide_log recent_hides_;
@@ -224,6 +240,7 @@ private:
 
 extern plugin g_plugin;
 extern CConVar<bool> cs2fow_enable;
+extern CConVar<bool> cs2fow_smoke_occlusion;
 extern CConVar<int> cs2fow_update_interval_ms;
 extern CConVar<int> cs2fow_base_lookahead_ms;
 extern CConVar<float> cs2fow_rtt_lookahead_scale;
