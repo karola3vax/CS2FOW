@@ -114,13 +114,13 @@ void test_smoke_occlusion()
 	smoke.volumes.resize(1);
 	volume = smoke.volumes.front();
 	volume.density.fill(50.0f);
-	volume.age_seconds = 0.1f;
+	volume.age_seconds = 0.75f;
 	assert(!smoke_line_blocked(smoke, {-100, 0, 0}, {100, 0, 0}));
-	volume.age_seconds = 1.5f;
+	volume.age_seconds = 1.25f;
 	assert(smoke_line_blocked(smoke, {-100, 0, 0}, {100, 0, 0}));
-	volume.age_seconds = 17.0f;
+	volume.age_seconds = 19.8f;
 	assert(smoke_line_blocked(smoke, {-100, 0, 0}, {100, 0, 0}));
-	volume.age_seconds = 21.9f;
+	volume.age_seconds = 20.3f;
 	assert(!smoke_line_blocked(smoke, {-100, 0, 0}, {100, 0, 0}));
 
 	std::vector<std::byte> storage(k_smoke_storage_density_offset + 2u * k_smoke_storage_frame_stride);

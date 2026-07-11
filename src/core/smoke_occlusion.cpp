@@ -16,6 +16,7 @@ constexpr float k_density_scale = 50.0f;
 constexpr float k_ignore_density = 0.1f;
 constexpr float k_opaque_density = 0.8f;
 constexpr float k_block_density = 0.2f;
+constexpr float k_visual_timing_margin = 0.5f;
 constexpr uint32_t k_max_steps = 128;
 
 float smoothstep(float value)
@@ -26,7 +27,9 @@ float smoothstep(float value)
 
 float age_scale(float age)
 {
-	return smoothstep((age - 0.1f) / 1.4f) * smoothstep((22.0f - age) / 5.0f);
+	const float delayed_growth_age = age - k_visual_timing_margin;
+	const float early_fade_age = age + k_visual_timing_margin;
+	return smoothstep((delayed_growth_age - 0.1f) / 1.4f) * smoothstep((22.0f - early_fade_age) / 5.0f);
 }
 
 uint32_t morton_index(uint32_t x, uint32_t y, uint32_t z)
