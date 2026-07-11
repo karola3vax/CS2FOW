@@ -41,6 +41,7 @@ inline constexpr uint32_t k_entity_scan_hard_limit = MAX_TOTAL_ENTITIES;
 inline constexpr uint32_t k_max_entity_name = 64;
 inline constexpr uint32_t k_max_hidden_player_entities = 1 + 2 + k_max_weapons + k_max_wearables + 1 + k_max_aux_visual_group_entities;
 inline constexpr uint32_t k_max_gamedata_offset = 4096;
+inline constexpr uint32_t k_max_module_rva = 512u * 1024u * 1024u;
 inline constexpr uint8_t k_life_alive = 0;
 inline constexpr uint8_t k_team_t = 2;
 inline constexpr uint8_t k_team_ct = 3;
@@ -158,6 +159,7 @@ public:
 	void hook_game_frame(bool simulating, bool first_tick, bool last_tick);
 	void hook_check_transmit(CCheckTransmitInfo **infos, int count, CBitVec<MAX_EDICTS> &, CBitVec<MAX_EDICTS> &,
 		const Entity2Networkable_t **, const uint16 *, int);
+	int hook_load_events_from_file(const char *filename, bool search_all);
 	void FireGameEvent(IGameEvent *event) override;
 	void print_status() const;
 	void print_entities(int edict);
@@ -214,10 +216,12 @@ private:
 	schema_offsets fields_;
 	uint32_t recipient_slot_offset_ {};
 	uint32_t entity_system_offset_ {};
+	uint32_t game_event_manager_vtable_rva_ {};
 	checktransmit_private_offsets transmit_offsets_;
 	smoke_private_layout smoke_layout_;
 	int game_frame_hook_id_ {};
 	int check_transmit_hook_id_ {};
+	int game_event_load_hook_id_ {};
 	std::string map_;
 	std::string disabled_reason_ {"no map loaded"};
 	map_source source_;

@@ -27,6 +27,7 @@ def configure(compiler, plugin=False):
       compiler.defines += ['stricmp=strcasecmp', '_stricmp=strcasecmp', '_snprintf=snprintf', '_vsnprintf=vsnprintf', 'HAVE_STDINT_H', 'GNUC']
       compiler.cflags += ['-fPIC', '-fvisibility=hidden']
       compiler.cxxflags += ['-fvisibility-inlines-hidden']
+      compiler.linkflags += ['-ldl']
   if builder.options.debug:
     compiler.defines += ['DEBUG', '_DEBUG']
     compiler.cflags += ['/Od'] if compiler.behavior == 'msvc' else ['-O0', '-g3']

@@ -450,7 +450,7 @@ bool plugin::capture(visibility_snapshot &value, float game_time)
 	lock.unlock();
 	value.filter_teammates = cs2fow_filter_teammates.Get();
 	value.smoke_enabled = cs2fow_smoke_occlusion.Get();
-	value.smoke_available = smoke_schema_available_ && smoke_gamedata_available_ && he_event_available_;
+	value.smoke_available = smoke_schema_available_ && smoke_gamedata_available_;
 	if (value.smoke_enabled && value.smoke_available
 		&& !capture_smokes(smoke_entities, smoke_count, smoke_overflow, game_time, value))
 	{

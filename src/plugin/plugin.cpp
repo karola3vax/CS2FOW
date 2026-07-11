@@ -36,11 +36,29 @@
 #include <string_view>
 #include <vector>
 
+#if defined(_WIN32)
+#include <Windows.h>
+#else
+#include <dlfcn.h>
+#endif
+
 namespace cs2fow
 {
 
 plugin g_plugin;
 constexpr const char *k_game_event_manager_interface = "GAMEEVENTSMANAGER002";
+
+void *module_base(const void *address)
+{
+#if defined(_WIN32)
+	HMODULE module {};
+	return GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+		reinterpret_cast<LPCSTR>(address), &module) ? module : nullptr;
+#else
+	Dl_info info {};
+	return dladdr(address, &info) != 0 ? info.dli_fbase : nullptr;
+#endif
+}
 
 void on_cs2fow_enable_changed(CConVar<bool> *, CSplitScreenSlot, const bool *new_value, const bool *old_value)
 {
@@ -111,6 +129,7 @@ CON_COMMAND_F(cs2fow_entity, "List, filter, or clear actual CS2FOW transmit clea
 
 SH_DECL_HOOK3_void(IServerGameDLL, GameFrame, SH_NOATTRIB, false, bool, bool, bool);
 SH_DECL_HOOK7_void(ISource2GameEntities, CheckTransmit, SH_NOATTRIB, false, CCheckTransmitInfo **, int, CBitVec<MAX_EDICTS> &, CBitVec<MAX_EDICTS> &, const Entity2Networkable_t **, const uint16 *, int);
+SH_DECL_HOOK2(IGameEventManager2, LoadEventsFromFile, SH_NOATTRIB, false, int, const char *, bool);
 
 bool plugin::Load(PluginId id, ISmmAPI *ismm, char *error, size_t maxlen, bool late)
 {
@@ -141,21 +160,38 @@ bool plugin::Load(PluginId id, ISmmAPI *ismm, char *error, size_t maxlen, bool l
 	{
 		game_events_ = static_cast<IGameEventManager2 *>(ismm->VInterfaceMatch(ismm->GetServerFactory(), k_game_event_manager_interface));
 	}
-	he_event_available_ = game_events_ != nullptr && game_events_->AddListener(this, "hegrenade_detonate", true);
 	META_CONVAR_REGISTER(FCVAR_RELEASE | FCVAR_GAMEDLL);
 	g_SMAPI->AddListener(this, this);
 
 	std::string reason;
 	const bool avx = cpu_supports_avx();
 	prerequisites_valid_ = avx && read_gamedata(reason) && resolve_schema(reason);
+	if (prerequisites_valid_ && game_event_manager_vtable_rva_ != 0)
+	{
+		void *base = module_base(*reinterpret_cast<void **>(game_entities_));
+		if (base != nullptr)
+		{
+			auto *vtable = reinterpret_cast<IGameEventManager2 *>(static_cast<uint8_t *>(base) + game_event_manager_vtable_rva_);
+			game_event_load_hook_id_ = SH_ADD_DVPHOOK(IGameEventManager2, LoadEventsFromFile, vtable,
+				SH_MEMBER(this, &plugin::hook_load_events_from_file), true);
+		}
+	}
+	if (game_events_ != nullptr)
+	{
+		he_event_available_ = game_events_->AddListener(this, "hegrenade_detonate", true);
+	}
 	if (!prerequisites_valid_)
 	{
 		disable(avx ? reason : "AVX and OS AVX state are required");
 		META_CONPRINTF("[CS2FOW] disabled: %s\n", disabled_reason_.c_str());
 	}
-	else if (!smoke_gamedata_available_ || !smoke_schema_available_ || !he_event_available_)
+	else if (!smoke_gamedata_available_ || !smoke_schema_available_)
 	{
 		META_CONPRINTF("[CS2FOW] smoke occlusion unavailable; wall filtering remains active\n");
+	}
+	else if (!he_event_available_ && game_event_load_hook_id_ == 0)
+	{
+		META_CONPRINTF("[CS2FOW] HE smoke clearing unavailable; ordinary smoke remains active\n");
 	}
 	META_CONPRINTF("[CS2FOW] loaded; culling is fail-open until a map bake validates\n");
 	return true;
@@ -166,6 +202,8 @@ bool plugin::Unload(char *error, size_t max_length)
 	if (game_events_ != nullptr) game_events_->RemoveListener(this);
 	game_events_ = nullptr;
 	he_event_available_ = false;
+	if (game_event_load_hook_id_ != 0) SH_REMOVE_HOOK_ID(game_event_load_hook_id_);
+	game_event_load_hook_id_ = 0;
 	automatic_baker_.stop();
 	worker_.stop();
 	if (game_frame_hook_id_ != 0) SH_REMOVE_HOOK_ID(game_frame_hook_id_);
@@ -174,6 +212,16 @@ bool plugin::Unload(char *error, size_t max_length)
 	check_transmit_hook_id_ = 0;
 	ConVar_Unregister();
 	return true;
+}
+
+int plugin::hook_load_events_from_file(const char *, bool)
+{
+	game_events_ = META_IFACEPTR(IGameEventManager2);
+	if (!he_event_available_ && game_events_ != nullptr)
+	{
+		he_event_available_ = game_events_->AddListener(this, "hegrenade_detonate", true);
+	}
+	RETURN_META_VALUE(MRES_IGNORED, 0);
 }
 
 void plugin::FireGameEvent(IGameEvent *event)
@@ -223,6 +271,7 @@ bool plugin::read_gamedata(std::string &error)
 	entity_system_offset_ = 0;
 	transmit_offsets_ = {};
 	smoke_layout_ = {};
+	game_event_manager_vtable_rva_ = 0;
 	smoke_gamedata_available_ = true;
 #if defined(_WIN32)
 	constexpr std::string_view k_recipient_key = "recipient_slot_offset_windows";
@@ -233,6 +282,7 @@ bool plugin::read_gamedata(std::string &error)
 	constexpr std::string_view k_smoke_frame_key = "smoke_frame_offset_windows";
 	constexpr std::string_view k_smoke_center_key = "smoke_center_offset_windows";
 	constexpr std::string_view k_smoke_start_time_key = "smoke_start_time_offset_windows";
+	constexpr std::string_view k_game_event_vtable_key = "game_event_manager_vtable_rva_windows";
 #else
 	constexpr std::string_view k_recipient_key = "recipient_slot_offset_linux";
 	constexpr std::string_view k_entity_system_key = "game_entity_system_offset_linux";
@@ -242,6 +292,7 @@ bool plugin::read_gamedata(std::string &error)
 	constexpr std::string_view k_smoke_frame_key = "smoke_frame_offset_linux";
 	constexpr std::string_view k_smoke_center_key = "smoke_center_offset_linux";
 	constexpr std::string_view k_smoke_start_time_key = "smoke_start_time_offset_linux";
+	constexpr std::string_view k_game_event_vtable_key = "game_event_manager_vtable_rva_linux";
 #endif
 	std::string line;
 	while (std::getline(stream, line))
@@ -254,7 +305,8 @@ bool plugin::read_gamedata(std::string &error)
 		const std::string key = line.substr(0, equals);
 		const bool smoke_key = key == k_smoke_volume_key || key == k_smoke_storage_key || key == k_smoke_frame_key
 			|| key == k_smoke_center_key || key == k_smoke_start_time_key;
-		if (key != k_recipient_key && key != k_entity_system_key && key != k_full_update_key && !smoke_key)
+		if (key != k_recipient_key && key != k_entity_system_key && key != k_full_update_key
+			&& key != k_game_event_vtable_key && !smoke_key)
 		{
 			continue;
 		}
@@ -262,9 +314,9 @@ bool plugin::read_gamedata(std::string &error)
 		uint32_t value {};
 		if (!parse_gamedata_uint32(text, value))
 		{
-			if (smoke_key)
+			if (smoke_key || key == k_game_event_vtable_key)
 			{
-				smoke_gamedata_available_ = false;
+				if (smoke_key) smoke_gamedata_available_ = false;
 				continue;
 			}
 			error = "invalid gamedata value for " + key;
@@ -278,6 +330,7 @@ bool plugin::read_gamedata(std::string &error)
 		if (key == k_smoke_frame_key) smoke_layout_.frame = value;
 		if (key == k_smoke_center_key) smoke_layout_.center = value;
 		if (key == k_smoke_start_time_key) smoke_layout_.start_time = value;
+		if (key == k_game_event_vtable_key) game_event_manager_vtable_rva_ = value;
 	}
 	if (recipient_slot_offset_ == 0 || entity_system_offset_ == 0 || transmit_offsets_.full_update_offset == 0)
 	{
@@ -297,6 +350,10 @@ bool plugin::read_gamedata(std::string &error)
 		&& valid_gamedata_offset(smoke_layout_.frame, static_cast<uint32_t>(alignof(int32_t)), k_max_gamedata_offset)
 		&& valid_gamedata_offset(smoke_layout_.center, static_cast<uint32_t>(alignof(float)), k_max_gamedata_offset)
 		&& valid_gamedata_offset(smoke_layout_.start_time, static_cast<uint32_t>(alignof(float)), k_max_gamedata_offset);
+	if (!valid_gamedata_offset(game_event_manager_vtable_rva_, static_cast<uint32_t>(alignof(void *)), k_max_module_rva))
+	{
+		game_event_manager_vtable_rva_ = 0;
+	}
 	return true;
 }
 
@@ -536,7 +593,7 @@ void plugin::print_status() const
 		stats.latest_ms, stats.average_ms, stats.maximum_ms, age_ms, stats.evaluated_pairs, stats.visible_pairs, stats.hidden_pairs,
 		static_cast<unsigned long long>(stats.cycles));
 	const bool smoke_available = result != nullptr ? result->smoke_available
-		: smoke_gamedata_available_ && smoke_schema_available_ && he_event_available_;
+		: smoke_gamedata_available_ && smoke_schema_available_;
 	META_CONPRINTF("[CS2FOW] smoke enabled=%d available=%d captured=%u he_events=%d he_clears=%u\n",
 		cs2fow_smoke_occlusion.Get() ? 1 : 0, smoke_available ? 1 : 0, result == nullptr ? 0u : result->smoke_count,
 		he_event_available_ ? 1 : 0, result == nullptr ? 0u : result->he_clearance_count);
