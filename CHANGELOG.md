@@ -4,6 +4,7 @@
 
 - Added default-on smoke occlusion from CS2's live voxel grid, with copied worker data and smoke-only fail-open behavior.
 - Matched visible smoke timing more closely by delaying initial occlusion and revealing fading smoke 0.5 seconds earlier.
+- Added optional teammate visibility filtering with the same wall, smoke, prediction, and full-group rules used for enemies.
 - Reorganized the runtime into map/game-state, worker, transmit, and automatic-baker responsibilities without intentionally changing proven visibility behavior.
 - Restricted filtering to CS2's verified primary transmit list and left full-update snapshots untouched.
 - Let visible enemies return through ordinary snapshots instead of waiting for CS2 to schedule a full update.

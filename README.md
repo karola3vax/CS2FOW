@@ -95,7 +95,7 @@ When a living enemy is fully behind solid map geometry, CS2FOW may remove that e
 
 This removes the main live position data used by wallhacks. It does not make every form of cheating impossible: sound, teammate information, last-known positions, and other game clues still exist.
 
-HLTV, spectators, dead players, teammates, and a player viewing themself are not filtered.
+HLTV, spectators, dead players, and a player viewing themself are not filtered. Teammates remain unfiltered by default; `cs2fow_filter_teammates 1` applies the same visibility rules to their complete visual groups and may also remove client-side teammate markers and radar information.
 
 ## The six-step runtime flow
 
@@ -104,7 +104,7 @@ HLTV, spectators, dead players, teammates, and a player viewing themself are not
 3. **Collect player points:** copy each living player's position, movement, body bounds, eye direction, latency, and held-weapon class on the game thread.
 4. **Cast rays:** a background worker checks eight safe recipient points against up to forty-eight target points. Targets include separate current and future axis-aligned bounding box corners, fifteen custom body points, and a weapon-muzzle point. Future positions stop at baked walls instead of passing through them.
 5. **Decide visibility:** one open ray reveals the target. A short hold keeps a recently revealed target visible to reduce corner pop-in.
-6. **Withhold hidden entities:** `CheckTransmit` reads the finished decision and clears only the verified primary transmit-list bits for a hidden enemy's visual group.
+6. **Withhold hidden entities:** `CheckTransmit` reads the finished decision and clears only the verified primary transmit-list bits for a hidden target's visual group.
 
 The worker receives copied numbers only. It never reads live CS2 objects.
 
@@ -137,6 +137,7 @@ Defaults in `cfg/cs2fow.cfg` are:
 | --- | ---: | --- |
 | `cs2fow_enable` | `1` | Enable filtering when all required data is valid. |
 | `cs2fow_smoke_occlusion` | `1` | Use CS2's live smoke grid. Smoke alone fails open if private smoke data is unavailable. |
+| `cs2fow_filter_teammates` | `0` | Apply the same visibility filtering to living teammates. |
 | `cs2fow_update_interval_ms` | `1` | Minimum time between player snapshots sent to the worker. |
 | `cs2fow_base_lookahead_ms` | `75` | Fixed movement lookahead before the RTT contribution. |
 | `cs2fow_rtt_lookahead_scale` | `1.5` | Multiplier applied to the recipient's current round-trip latency. |
@@ -154,7 +155,7 @@ Automatic baking needs write access to `addons/cs2fow/data/maps`. On Linux, the 
 
 ## Status and debug commands
 
-`cs2fow_status` prints whether the plugin is active, why it is fail open when inactive, map and bake details, worker timings, true snapshot age, pair counts, smoke availability and count, and automatic-bake progress.
+`cs2fow_status` prints whether the plugin is active, why it is fail open when inactive, map and bake details, worker timings, true snapshot age, pair counts, smoke availability and count, teammate-filtering state, and automatic-bake progress.
 
 `cs2fow_debug 1` starts silent evidence collection. It adds a record only when CS2FOW found a primary transmit bit set immediately before clearing it. It does not print every clear.
 

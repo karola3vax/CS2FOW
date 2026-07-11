@@ -104,6 +104,7 @@ void visibility_worker::run()
 		auto result = std::make_shared<visibility_result>();
 		result->sequence = current.sequence;
 		result->captured = current.captured;
+		result->filter_teammates = current.filter_teammates;
 		result->smoke_enabled = current.smoke_enabled;
 		result->smoke_available = current.smoke_available;
 		result->smoke_count = current.smokes == nullptr ? 0u : static_cast<uint32_t>(current.smokes->volumes.size());
@@ -129,7 +130,7 @@ void visibility_worker::run()
 				result->visible[recipient][target] = true;
 				const player_state &from = current.players[recipient];
 				const player_state &to = current.players[target];
-				if (!from.valid || !to.valid || recipient == target || from.team == to.team)
+				if (!visibility_pair_enabled(recipient, target, from, to, current.filter_teammates))
 				{
 					continue;
 				}

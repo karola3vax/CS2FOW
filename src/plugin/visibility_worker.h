@@ -37,10 +37,17 @@ struct player_state
 	int pawn_entity {-1};
 };
 
+inline bool visibility_pair_enabled(uint32_t recipient, uint32_t target, const player_state &from,
+	const player_state &to, bool filter_teammates)
+{
+	return from.valid && to.valid && recipient != target && (filter_teammates || from.team != to.team);
+}
+
 struct visibility_snapshot
 {
 	uint64_t sequence {};
 	std::chrono::steady_clock::time_point captured;
+	bool filter_teammates {};
 	bool smoke_enabled {};
 	bool smoke_available {};
 	std::shared_ptr<const smoke_snapshot> smokes;
@@ -54,6 +61,7 @@ struct visibility_result
 	std::chrono::steady_clock::time_point completed;
 	player_state players[k_max_players];
 	float recipient_lookahead_seconds[k_max_players] {};
+	bool filter_teammates {};
 	bool smoke_enabled {};
 	bool smoke_available {};
 	uint32_t smoke_count {};

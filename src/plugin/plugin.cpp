@@ -51,6 +51,7 @@ void on_cs2fow_enable_changed(CConVar<bool> *, CSplitScreenSlot, const bool *new
 
 CConVar<bool> cs2fow_enable("cs2fow_enable", FCVAR_NONE, "Enable CS2FOW when map data is valid", true, on_cs2fow_enable_changed);
 CConVar<bool> cs2fow_smoke_occlusion("cs2fow_smoke_occlusion", FCVAR_NONE, "Use live CS2 smoke for visibility", true, on_cs2fow_enable_changed);
+CConVar<bool> cs2fow_filter_teammates("cs2fow_filter_teammates", FCVAR_NONE, "Apply visibility filtering to teammates", false, on_cs2fow_enable_changed);
 CConVar<int> cs2fow_update_interval_ms("cs2fow_update_interval_ms", FCVAR_NONE, "Visibility worker update interval", 1, true, 1, true, 250);
 CConVar<int> cs2fow_base_lookahead_ms("cs2fow_base_lookahead_ms", FCVAR_NONE, "Fixed movement lookahead before recipient RTT", 75, true, 0, true, 500);
 CConVar<float> cs2fow_rtt_lookahead_scale("cs2fow_rtt_lookahead_scale", FCVAR_NONE, "Recipient RTT multiplier for movement lookahead", 1.5f, true, 0.0f, true, 4.0f);
@@ -503,6 +504,7 @@ void plugin::print_status() const
 	const bool smoke_available = result != nullptr ? result->smoke_available : smoke_gamedata_available_ && smoke_schema_available_;
 	META_CONPRINTF("[CS2FOW] smoke enabled=%d available=%d captured=%u\n", cs2fow_smoke_occlusion.Get() ? 1 : 0,
 		smoke_available ? 1 : 0, result == nullptr ? 0u : result->smoke_count);
+	META_CONPRINTF("[CS2FOW] teammate filtering=%d\n", cs2fow_filter_teammates.Get() ? 1 : 0);
 	std::string bake_map;
 	double bake_elapsed_ms = 0;
 	if (automatic_baker_.status(bake_map, bake_elapsed_ms))
