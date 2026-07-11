@@ -111,7 +111,7 @@ void visibility_worker::run()
 			if (current.players[recipient].valid)
 			{
 				recipient_lookahead[recipient] = visibility_effective_lookahead_seconds(current.players[recipient].rtt_seconds, tuning);
-				recipient_origins[recipient] = visibility_origins(*data_, sample_player(current.players[recipient]), tuning, recipient_lookahead[recipient]);
+				recipient_origins[recipient] = visibility_origins(*data_, sample_player(current.players[recipient]), recipient_lookahead[recipient]);
 			}
 		}
 		for (uint32_t recipient = 0; recipient < k_max_players; ++recipient)
@@ -128,7 +128,7 @@ void visibility_worker::run()
 				++result->evaluated_pairs;
 				bool blocked = true;
 				const auto &ray_origins = recipient_origins[recipient];
-				const auto ray_targets = visibility_targets(*data_, sample_player(to), tuning, recipient_lookahead[recipient]);
+				const auto ray_targets = visibility_targets(*data_, sample_player(to), recipient_lookahead[recipient]);
 				uint32_t ray = 0;
 				for (const vec3 &origin : ray_origins)
 				{

@@ -50,10 +50,9 @@ void on_cs2fow_enable_changed(CConVar<bool> *, CSplitScreenSlot, const bool *new
 
 CConVar<bool> cs2fow_enable("cs2fow_enable", FCVAR_NONE, "Enable CS2FOW when map data is valid", true, on_cs2fow_enable_changed);
 CConVar<int> cs2fow_update_interval_ms("cs2fow_update_interval_ms", FCVAR_NONE, "Visibility worker update interval", 1, true, 1, true, 250);
-CConVar<int> cs2fow_max_lookahead_ms("cs2fow_max_lookahead_ms", FCVAR_NONE, "Maximum latency lookahead", 500, true, 0, true, 500);
-CConVar<int> cs2fow_min_lookahead_ms("cs2fow_min_lookahead_ms", FCVAR_NONE, "Minimum reveal lookahead", 200, true, 0, true, 500);
-CConVar<int> cs2fow_peek_margin_units("cs2fow_peek_margin_units", FCVAR_NONE, "Maximum speed-stepped peek margin in Source units", 160, true, 0, true, 256);
-CConVar<int> cs2fow_visibility_hold_ms("cs2fow_visibility_hold_ms", FCVAR_NONE, "Minimum revealed duration", 50, true, 0, true, 1000);
+CConVar<int> cs2fow_base_lookahead_ms("cs2fow_base_lookahead_ms", FCVAR_NONE, "Lookahead before half of recipient RTT is added", 50, true, 0, true, 500);
+CConVar<int> cs2fow_max_lookahead_ms("cs2fow_max_lookahead_ms", FCVAR_NONE, "Maximum movement and latency lookahead", 150, true, 0, true, 500);
+CConVar<int> cs2fow_visibility_hold_ms("cs2fow_visibility_hold_ms", FCVAR_NONE, "Minimum revealed duration", 32, true, 0, true, 1000);
 CConVar<bool> cs2fow_debug("cs2fow_debug", FCVAR_NONE, "Enable CS2FOW diagnostic logging", false);
 
 CON_COMMAND_F(cs2fow_status, "Report CS2FOW state", FCVAR_NONE)
@@ -436,10 +435,8 @@ void plugin::hook_game_frame(bool simulating, bool first_tick, bool last_tick)
 	}
 	last_snapshot_ = now;
 	worker_.submit(std::move(value), static_cast<uint32_t>(cs2fow_visibility_hold_ms.Get()), {
-		static_cast<uint32_t>(cs2fow_update_interval_ms.Get()),
-		static_cast<uint32_t>(cs2fow_min_lookahead_ms.Get()),
-		static_cast<uint32_t>(cs2fow_max_lookahead_ms.Get()),
-		static_cast<float>(cs2fow_peek_margin_units.Get())
+		static_cast<uint32_t>(cs2fow_base_lookahead_ms.Get()),
+		static_cast<uint32_t>(cs2fow_max_lookahead_ms.Get())
 	});
 }
 

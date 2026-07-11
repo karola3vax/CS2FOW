@@ -419,9 +419,8 @@ bool plugin::capture(visibility_snapshot &value)
 		{
 			if (update_pair_guard(pair_guards_[recipient][target], keys[recipient], stable_slots[recipient],
 				keys[target], stable_slots[target], now, k_pair_baseline_warmup)
-				&& (awaiting_full_update_[recipient][target] || hidden_groups_[recipient][target].count != 0))
+				&& hidden_groups_[recipient][target].count != 0)
 			{
-				awaiting_full_update_[recipient][target] = false;
 				hidden_group_clear(hidden_groups_[recipient][target]);
 			}
 		}

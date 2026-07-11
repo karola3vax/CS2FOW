@@ -215,7 +215,6 @@ private:
 	std::array<lifecycle_guard, k_max_players> lifecycle_;
 	std::array<std::array<pair_guard, k_max_players>, k_max_players> pair_guards_;
 	std::array<std::array<visual_entity_group, k_max_players>, k_max_players> hidden_groups_;
-	std::array<std::array<bool, k_max_players>, k_max_players> awaiting_full_update_;
 	std::array<target_transmit_cache, k_max_players> transmit_target_cache_;
 	std::mutex transmit_state_mutex_;
 	std::chrono::steady_clock::time_point last_snapshot_ {};
@@ -226,9 +225,8 @@ private:
 extern plugin g_plugin;
 extern CConVar<bool> cs2fow_enable;
 extern CConVar<int> cs2fow_update_interval_ms;
+extern CConVar<int> cs2fow_base_lookahead_ms;
 extern CConVar<int> cs2fow_max_lookahead_ms;
-extern CConVar<int> cs2fow_min_lookahead_ms;
-extern CConVar<int> cs2fow_peek_margin_units;
 extern CConVar<int> cs2fow_visibility_hold_ms;
 extern CConVar<bool> cs2fow_debug;
 

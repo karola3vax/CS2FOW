@@ -12,7 +12,7 @@
 namespace cs2fow
 {
 
-inline constexpr uint32_t k_visibility_origin_count = 10;
+inline constexpr uint32_t k_visibility_origin_count = 8;
 inline constexpr uint32_t k_visibility_target_count_max = 40;
 inline constexpr uint32_t k_visibility_ray_count_max = k_visibility_origin_count * k_visibility_target_count_max;
 
@@ -39,10 +39,8 @@ struct visibility_player
 
 struct visibility_tuning
 {
-	uint32_t update_interval_ms {1};
-	uint32_t min_lookahead_ms {200};
-	uint32_t max_lookahead_ms {500};
-	float peek_margin_units {160.0f};
+	uint32_t base_lookahead_ms {50};
+	uint32_t max_lookahead_ms {150};
 };
 
 struct visibility_target_points
@@ -52,10 +50,10 @@ struct visibility_target_points
 };
 
 float visibility_effective_lookahead_seconds(float rtt_seconds, const visibility_tuning &tuning);
-vec3 visibility_prediction_offset(vec3 velocity, float seconds, float peek_margin_units);
+vec3 visibility_prediction_offset(vec3 velocity, float seconds);
 weapon_muzzle_class weapon_muzzle_class_from_item_definition(uint16_t item_definition);
 float weapon_muzzle_length(weapon_muzzle_class value);
-std::array<vec3, k_visibility_origin_count> visibility_origins(const bvh8_data &data, const visibility_player &player, const visibility_tuning &tuning, float lookahead_seconds);
-visibility_target_points visibility_targets(const bvh8_data &data, const visibility_player &player, const visibility_tuning &tuning, float lookahead_seconds);
+std::array<vec3, k_visibility_origin_count> visibility_origins(const bvh8_data &data, const visibility_player &player, float lookahead_seconds);
+visibility_target_points visibility_targets(const bvh8_data &data, const visibility_player &player, float lookahead_seconds);
 
 } // namespace cs2fow

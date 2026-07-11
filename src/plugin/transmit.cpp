@@ -153,10 +153,6 @@ void plugin::reset_transmit_state(bool clear_debug_records)
 			hidden_group_clear(group);
 		}
 	}
-	for (auto &row : awaiting_full_update_)
-	{
-		row.fill(false);
-	}
 	aux_visual_count_ = 0;
 	for (aux_visual_entity &entity : aux_visual_entities_)
 	{
@@ -191,7 +187,6 @@ void plugin::hook_check_transmit(CCheckTransmitInfo **infos, int count, CBitVec<
 		{
 			continue;
 		}
-		awaiting_full_update_[slot].fill(false);
 		for (visual_entity_group &group : hidden_groups_[slot])
 		{
 			hidden_group_clear(group);
@@ -269,12 +264,6 @@ void plugin::hook_check_transmit(CCheckTransmitInfo **infos, int count, CBitVec<
 			{
 				update_pair_visual_group(guard, cache.group_key, now, k_pair_baseline_warmup);
 			}
-			if (awaiting_full_update_[slot][target] && cache.group_valid)
-			{
-				hidden_group_store(stored_group, cache.group, now, k_hidden_entity_quarantine);
-				clear_group(system, info->m_pTransmitEntity, cache.group, slot, hide_reason::current, now);
-				continue;
-			}
 			if (result->visible[slot][target])
 			{
 				if (full_group_marked)
@@ -302,7 +291,6 @@ void plugin::hook_check_transmit(CCheckTransmitInfo **infos, int count, CBitVec<
 				continue;
 			}
 			hidden_group_store(stored_group, cache.group, now, k_hidden_entity_quarantine);
-			awaiting_full_update_[slot][target] = true;
 			clear_group(system, info->m_pTransmitEntity, cache.group, slot, hide_reason::current, now);
 		}
 	}

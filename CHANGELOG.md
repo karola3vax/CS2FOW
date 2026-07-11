@@ -4,7 +4,8 @@
 
 - Reorganized the runtime into map/game-state, worker, transmit, and automatic-baker responsibilities without intentionally changing proven visibility behavior.
 - Restricted filtering to CS2's verified primary transmit list and left full-update snapshots untouched.
-- Kept hidden visual groups withheld until CS2 naturally sends the recipient a full update; CS2FOW never requests one.
+- Let visible enemies return through ordinary snapshots instead of waiting for CS2 to schedule a full update.
+- Replaced aggressive movement preload with a 50 ms base plus half of recipient RTT, capped at 150 ms by default, and removed forced distance tiers.
 - Added fixed-size `cs2fow_entity` evidence for real primary-bit clears, including direct and owner/effect-linked membership.
 - Hardened player lifecycles, visual-group identity, linked entities, stale results, and fail-open resets.
 - Added validated BVH8 version 3 files with streaming CRC checks and verified atomic replacement; older bakes are rejected.

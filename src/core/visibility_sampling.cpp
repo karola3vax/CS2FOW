@@ -12,14 +12,14 @@ namespace cs2fow
 namespace
 {
 
-constexpr float k_max_prediction_speed = 500.0f;
-constexpr float k_min_prediction_speed = 1.0f;
+constexpr float k_max_prediction_speed = 350.0f;
+constexpr float k_min_prediction_speed = 100.0f;
 constexpr float k_base_bounds_padding = 4.0f;
 constexpr float k_predicted_bounds_padding = 8.0f;
 constexpr float k_shoulder_origin_offset = 24.0f;
 constexpr float k_vertical_origin_offset = 24.0f;
 constexpr float k_same_point_epsilon_sq = 1.0e-4f;
-constexpr float k_rtt_lookahead_scale = 2.0f;
+constexpr float k_rtt_lookahead_scale = 0.5f;
 constexpr float k_degrees_to_radians = 0.017453292519943295769f;
 constexpr float k_standing_player_height = 72.0f;
 constexpr float k_pelvis_height = 38.0f;
@@ -47,32 +47,6 @@ constexpr std::array<body_point, 15> k_body_points {{
 	{{16.97650970898366f, 6.7731795517149544f, 51.74577989786342f}},
 	{{-1.738377928258503f, 4.30848079861881f, 46.753597185311996f}}
 }};
-
-float stepped_peek_margin(float speed, float max_margin)
-{
-	max_margin = std::max(0.0f, max_margin);
-	if (speed < 25.0f)
-	{
-		return max_margin * 0.10f;
-	}
-	if (speed < 75.0f)
-	{
-		return max_margin * 0.20f;
-	}
-	if (speed < 150.0f)
-	{
-		return max_margin * 0.40f;
-	}
-	if (speed < 250.0f)
-	{
-		return max_margin * 0.60f;
-	}
-	if (speed < 300.0f)
-	{
-		return max_margin * 0.80f;
-	}
-	return max_margin;
-}
 
 float distance_sq(vec3 a, vec3 b)
 {
@@ -217,23 +191,23 @@ float visibility_effective_lookahead_seconds(float rtt_seconds, const visibility
 		return 0.0f;
 	}
 	const float rtt_ms = std::max(0.0f, rtt_seconds) * 1000.0f;
-	const float wanted_ms = static_cast<float>(tuning.min_lookahead_ms) + rtt_ms * k_rtt_lookahead_scale;
+	const float wanted_ms = static_cast<float>(tuning.base_lookahead_ms) + rtt_ms * k_rtt_lookahead_scale;
 	return std::clamp(wanted_ms, 0.0f, static_cast<float>(tuning.max_lookahead_ms)) / 1000.0f;
 }
 
-vec3 visibility_prediction_offset(vec3 velocity, float seconds, float peek_margin_units)
+vec3 visibility_prediction_offset(vec3 velocity, float seconds)
 {
 	if (seconds <= 0.0f)
 	{
 		return {};
 	}
 	const float speed = std::sqrt(velocity.x * velocity.x + velocity.y * velocity.y);
-	if (speed <= k_min_prediction_speed)
+	if (speed < k_min_prediction_speed)
 	{
 		return {};
 	}
 	const float capped_speed = std::min(speed, k_max_prediction_speed);
-	const float distance = std::max(capped_speed * seconds, stepped_peek_margin(speed, peek_margin_units));
+	const float distance = capped_speed * seconds;
 	const float scale = distance / speed;
 	return {velocity.x * scale, velocity.y * scale, 0.0f};
 }
@@ -297,9 +271,9 @@ float weapon_muzzle_length(weapon_muzzle_class value)
 	}
 }
 
-std::array<vec3, k_visibility_origin_count> visibility_origins(const bvh8_data &data, const visibility_player &player, const visibility_tuning &tuning, float lookahead_seconds)
+std::array<vec3, k_visibility_origin_count> visibility_origins(const bvh8_data &data, const visibility_player &player, float lookahead_seconds)
 {
-	const vec3 predicted = add(player.eye, visibility_prediction_offset(player.velocity, lookahead_seconds, tuning.peek_margin_units));
+	const vec3 predicted = add(player.eye, visibility_prediction_offset(player.velocity, lookahead_seconds));
 	const vec3 shoulder = scale(eye_right(player.eye_yaw_degrees), k_shoulder_origin_offset);
 	const vec3 left = subtract(player.eye, shoulder);
 	const vec3 right = add(player.eye, shoulder);
@@ -307,9 +281,7 @@ std::array<vec3, k_visibility_origin_count> visibility_origins(const bvh8_data &
 	const vec3 predicted_right = add(predicted, shoulder);
 	const vec3 vertical {0.0f, 0.0f, k_vertical_origin_offset};
 	const vec3 up = add(player.eye, vertical);
-	const vec3 down = subtract(player.eye, vertical);
 	const vec3 predicted_up = add(predicted, vertical);
-	const vec3 predicted_down = subtract(predicted, vertical);
 	return {
 		player.eye,
 		safe_origin(data, player.eye, predicted),
@@ -318,16 +290,14 @@ std::array<vec3, k_visibility_origin_count> visibility_origins(const bvh8_data &
 		safe_origin(data, player.eye, predicted_left),
 		safe_origin(data, player.eye, predicted_right),
 		safe_origin(data, player.eye, up),
-		safe_origin(data, player.eye, down),
-		safe_origin(data, player.eye, predicted_up),
-		safe_origin(data, player.eye, predicted_down)
+		safe_origin(data, player.eye, predicted_up)
 	};
 }
 
-visibility_target_points visibility_targets(const bvh8_data &data, const visibility_player &player, const visibility_tuning &tuning, float lookahead_seconds)
+visibility_target_points visibility_targets(const bvh8_data &data, const visibility_player &player, float lookahead_seconds)
 {
 	visibility_target_points targets;
-	const vec3 offset = visibility_prediction_offset(player.velocity, lookahead_seconds, tuning.peek_margin_units);
+	const vec3 offset = visibility_prediction_offset(player.velocity, lookahead_seconds);
 	bool predicted = false;
 	if (distance_sq({}, offset) > k_same_point_epsilon_sq)
 	{
