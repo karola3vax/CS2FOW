@@ -241,6 +241,7 @@ private:
 extern plugin g_plugin;
 extern CConVar<bool> cs2fow_enable;
 extern CConVar<bool> cs2fow_smoke_occlusion;
+extern CConVar<bool> cs2fow_filter_teammates;
 extern CConVar<int> cs2fow_update_interval_ms;
 extern CConVar<int> cs2fow_base_lookahead_ms;
 extern CConVar<float> cs2fow_rtt_lookahead_scale;

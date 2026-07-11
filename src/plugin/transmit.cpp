@@ -254,7 +254,8 @@ void plugin::hook_check_transmit(CCheckTransmitInfo **infos, int count, CBitVec<
 			{
 				hidden_group_clear(stored_group);
 			}
-			if (!player.valid || player.team == recipient.team || cache.pawn == nullptr)
+			if (!visibility_pair_enabled(static_cast<uint32_t>(slot), target, recipient, player,
+				result->filter_teammates) || cache.pawn == nullptr)
 			{
 				continue;
 			}

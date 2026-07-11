@@ -83,6 +83,23 @@ uint32_t test_morton(uint32_t x, uint32_t y, uint32_t z)
 	return result;
 }
 
+void test_visibility_pair_eligibility()
+{
+	player_state t;
+	t.valid = true;
+	t.team = 2;
+	player_state ct = t;
+	ct.team = 3;
+	const player_state invalid;
+	assert(visibility_pair_enabled(0, 1, t, ct, false));
+	assert(visibility_pair_enabled(0, 1, t, ct, true));
+	assert(!visibility_pair_enabled(0, 1, t, t, false));
+	assert(visibility_pair_enabled(0, 1, t, t, true));
+	assert(!visibility_pair_enabled(0, 0, t, ct, true));
+	assert(!visibility_pair_enabled(0, 1, invalid, ct, true));
+	assert(!visibility_pair_enabled(0, 1, t, invalid, true));
+}
+
 void test_smoke_occlusion()
 {
 	smoke_snapshot smoke;
@@ -396,7 +413,18 @@ void test_visibility_worker()
 	worker->submit(value, 16, {75, 1.5f, 375, 96.0f, 24.0f, 0.64f, 128.0f});
 	result = wait_for(4);
 	assert(result && !result->visible[0][1]);
-	assert(worker->stats().cycles == 4);
+	value.players[1].team = 2;
+	value.sequence = 5;
+	value.filter_teammates = false;
+	worker->submit(value, 16, {75, 1.5f, 375, 96.0f, 24.0f, 0.64f, 128.0f});
+	result = wait_for(5);
+	assert(result && result->visible[0][1] && result->evaluated_pairs == 0 && !result->filter_teammates);
+	value.sequence = 6;
+	value.filter_teammates = true;
+	worker->submit(value, 16, {75, 1.5f, 375, 96.0f, 24.0f, 0.64f, 128.0f});
+	result = wait_for(6);
+	assert(result && !result->visible[0][1] && result->evaluated_pairs == 2 && result->filter_teammates);
+	assert(worker->stats().cycles == 6);
 	worker->start(&wall);
 	assert(worker->stats().cycles == 0);
 	worker->stop();
@@ -407,15 +435,16 @@ void test_visibility_worker()
 	smokes->volumes.emplace_back();
 	smokes->volumes.back().age_seconds = 2.0f;
 	smokes->volumes.back().density.fill(50.0f);
-	value.sequence = 5;
+	value.sequence = 7;
 	value.captured = std::chrono::steady_clock::now();
 	value.players[0] = {true, 2, {0, 0, 64}, {0, 0, 0}, {}, {-16, -16, 0}, {16, 16, 72}};
-	value.players[1] = {true, 3, {64, 0, 64}, {64, 0, 0}, {200, 0, 0}, {-16, -16, 0}, {16, 16, 72}};
+	value.players[1] = {true, 2, {64, 0, 64}, {64, 0, 0}, {200, 0, 0}, {-16, -16, 0}, {16, 16, 72}};
+	value.filter_teammates = true;
 	value.smoke_enabled = true;
 	value.smoke_available = true;
 	value.smokes = smokes;
 	worker->submit(value, 0, {75, 1.5f, 375, 96.0f, 24.0f, 0.64f, 128.0f});
-	result = wait_for(5);
+	result = wait_for(7);
 	assert(result && !result->visible[0][1] && result->smoke_count == 1);
 	smokes->volumes.back().density.fill(0.0f);
 	for (uint32_t x = 16; x < 20; ++x)
@@ -424,14 +453,22 @@ void test_visibility_worker()
 		smokes->volumes.back().opaque_cells[cell >> 3u] |= static_cast<uint8_t>(1u << (cell & 7u));
 	}
 	assert(smoke_line_blocked(*smokes, {0, 0, 64}, {64, 0, 64}));
-	value.sequence = 6;
+	value.sequence = 8;
 	worker->submit(value, 0, {75, 1.5f, 375, 96.0f, 24.0f, 0.64f, 128.0f});
-	result = wait_for(6);
+	result = wait_for(8);
 	assert(result && result->visible[0][1]);
-	value.sequence = 7;
+	smokes->volumes.back().opaque_cells.fill(0);
+	smokes->volumes.back().density.fill(50.0f);
+	value.sequence = 9;
+	value.filter_teammates = false;
+	worker->submit(value, 0, {75, 1.5f, 375, 96.0f, 24.0f, 0.64f, 128.0f});
+	result = wait_for(9);
+	assert(result && result->visible[0][1] && result->evaluated_pairs == 0);
+	value.sequence = 10;
+	value.filter_teammates = true;
 	value.smoke_available = false;
 	worker->submit(value, 0, {75, 1.5f, 375, 96.0f, 24.0f, 0.64f, 128.0f});
-	result = wait_for(7);
+	result = wait_for(10);
 	assert(result && result->visible[0][1]);
 	worker->stop();
 }
@@ -742,7 +779,7 @@ double benchmark_worker_loop(const bvh8_data &data, const std::string &label)
 		{
 			for (uint32_t target = 0; target < k_players; ++target)
 			{
-				if ((recipient < 16u) == (target < 16u))
+				if (recipient == target)
 				{
 					continue;
 				}
@@ -778,7 +815,9 @@ double benchmark_worker_loop(const bvh8_data &data, const std::string &label)
 	double average = 0;
 	for (double timing : timings) average += timing;
 	average /= timings.size();
-	std::cout << label << " worker-loop: average=" << average << "ms p99=" << timings.back() << "ms pairs=512 rays_max=" << 512u * k_visibility_ray_count_max << " blocked_pairs=" << blocked_pairs << '\n';
+	constexpr uint32_t k_pairs = k_players * (k_players - 1u);
+	std::cout << label << " worker-loop: average=" << average << "ms p99=" << timings.back() << "ms pairs=" << k_pairs
+		<< " rays_max=" << k_pairs * k_visibility_ray_count_max << " blocked_pairs=" << blocked_pairs << '\n';
 	return average;
 }
 
@@ -786,6 +825,7 @@ double benchmark_worker_loop(const bvh8_data &data, const std::string &label)
 
 void run_visibility_and_transmit_tests()
 {
+	test_visibility_pair_eligibility();
 	test_smoke_occlusion();
 	test_visibility_sampling();
 	test_visibility_worker();

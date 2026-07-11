@@ -433,6 +433,7 @@ bool plugin::capture(visibility_snapshot &value, float game_time)
 	std::unique_lock<std::mutex> lock(transmit_state_mutex_);
 	refresh_entity_caches(system, smoke_entities, smoke_count, smoke_overflow);
 	lock.unlock();
+	value.filter_teammates = cs2fow_filter_teammates.Get();
 	value.smoke_enabled = cs2fow_smoke_occlusion.Get();
 	value.smoke_available = smoke_schema_available_ && smoke_gamedata_available_;
 	if (value.smoke_enabled && value.smoke_available
