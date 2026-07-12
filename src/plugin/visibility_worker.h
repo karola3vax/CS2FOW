@@ -11,6 +11,7 @@
 #include <array>
 #include <chrono>
 #include <condition_variable>
+#include <cmath>
 #include <cstdint>
 #include <memory>
 #include <mutex>
@@ -36,6 +37,17 @@ struct player_state
 	weapon_muzzle_class muzzle_class {weapon_muzzle_class::none};
 	int pawn_entity {-1};
 };
+
+inline bool valid_player_numbers(const player_state &player)
+{
+	const auto finite = [](vec3 value)
+	{
+		return std::isfinite(value.x) && std::isfinite(value.y) && std::isfinite(value.z);
+	};
+	return finite(player.origin) && finite(player.eye) && finite(player.velocity) && finite(player.mins) && finite(player.maxs)
+		&& std::isfinite(player.eye_yaw_degrees) && std::isfinite(player.rtt_seconds)
+		&& player.mins.x <= player.maxs.x && player.mins.y <= player.maxs.y && player.mins.z <= player.maxs.z;
+}
 
 inline bool visibility_pair_enabled(uint32_t recipient, uint32_t target, const player_state &from,
 	const player_state &to, bool filter_teammates)

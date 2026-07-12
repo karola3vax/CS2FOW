@@ -6,6 +6,7 @@
 
 #include <atomic>
 #include <chrono>
+#include <cstddef>
 #include <filesystem>
 #include <string>
 #include <vector>
@@ -13,11 +14,14 @@
 namespace cs2fow
 {
 
+inline constexpr size_t k_process_output_tail_bytes = 8u * 1024u;
+
 struct process_result
 {
 	int exit_code {-1};
 	bool cancelled {};
 	bool timed_out {};
+	std::string output_tail;
 };
 
 bool run_process(const std::filesystem::path &executable, const std::vector<std::string> &arguments,

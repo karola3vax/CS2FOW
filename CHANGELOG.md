@@ -15,6 +15,9 @@
 - Kept safe movement up to baked walls, replaced merged target boxes with separate current/future boxes, and corrected stale-result age to use snapshot capture time.
 - Added fixed-size `cs2fow_entity` evidence for real primary-bit clears, including direct and owner/effect-linked membership.
 - Hardened player lifecycles, visual-group identity, linked entities, stale results, and fail-open resets.
+- Bound private gamedata to verified Windows and Linux server binaries and rejected unsafe player numbers before ray casting.
+- Added snapshot-capture and CheckTransmit timings, full networked-edict linked-visual coverage, and accurate active-HE status wording.
+- Captured bounded VRF and automatic-baker error output so failures include their useful final messages.
 - Added validated BVH8 version 3 files with streaming CRC checks and verified atomic replacement; older bakes are rejected.
 - Moved all Workshop VPK discovery and extraction into the C++ baker, including the public `--list-maps` command.
 - Added held-weapon muzzle sampling alongside body and axis-aligned bounding box target points.

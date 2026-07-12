@@ -4,6 +4,7 @@
 // the command-line baker. Platform handles are always closed, and timeout or
 // cancellation terminates the child and returns an ordinary result/error.
 
+#include <algorithm>
 #include <thread>
 
 #if defined(_WIN32)
@@ -12,6 +13,7 @@
 #include <cerrno>
 #include <csignal>
 #include <cstring>
+#include <fcntl.h>
 #include <spawn.h>
 #include <sys/resource.h>
 #include <sys/wait.h>
@@ -23,6 +25,20 @@ namespace cs2fow
 {
 namespace
 {
+
+void append_output_tail(std::string &tail, const char *data, size_t size)
+{
+	if (size >= k_process_output_tail_bytes)
+	{
+		tail.assign(data + size - k_process_output_tail_bytes, k_process_output_tail_bytes);
+		return;
+	}
+	if (tail.size() + size > k_process_output_tail_bytes)
+	{
+		tail.erase(0, tail.size() + size - k_process_output_tail_bytes);
+	}
+	tail.append(data, size);
+}
 
 #if defined(_WIN32)
 std::wstring widen(const std::string &value)
@@ -128,16 +144,36 @@ bool run_process(const std::filesystem::path &executable, const std::vector<std:
 		error = "could not configure process job";
 		return false;
 	}
-	const DWORD flags = CREATE_SUSPENDED | CREATE_NO_WINDOW | (low_priority ? BELOW_NORMAL_PRIORITY_CLASS : 0);
-	if (!CreateProcessW(executable_wide.c_str(), mutable_command.data(), nullptr, nullptr, FALSE, flags, nullptr, nullptr, &startup, &process))
+	SECURITY_ATTRIBUTES pipe_security {sizeof(pipe_security), nullptr, TRUE};
+	HANDLE output_read = nullptr;
+	HANDLE output_write = nullptr;
+	if (!CreatePipe(&output_read, &output_write, &pipe_security, 0)
+		|| !SetHandleInformation(output_read, HANDLE_FLAG_INHERIT, 0))
 	{
+		if (output_read != nullptr) CloseHandle(output_read);
+		if (output_write != nullptr) CloseHandle(output_write);
+		CloseHandle(job);
+		error = "could not create process output pipe";
+		return false;
+	}
+	startup.dwFlags = STARTF_USESTDHANDLES;
+	startup.hStdInput = nullptr;
+	startup.hStdOutput = output_write;
+	startup.hStdError = output_write;
+	const DWORD flags = CREATE_SUSPENDED | CREATE_NO_WINDOW | (low_priority ? BELOW_NORMAL_PRIORITY_CLASS : 0);
+	if (!CreateProcessW(executable_wide.c_str(), mutable_command.data(), nullptr, nullptr, TRUE, flags, nullptr, nullptr, &startup, &process))
+	{
+		CloseHandle(output_read);
+		CloseHandle(output_write);
 		CloseHandle(job);
 		error = "could not start process";
 		return false;
 	}
+	CloseHandle(output_write);
 	if (!AssignProcessToJobObject(job, process.hProcess))
 	{
 		TerminateProcess(process.hProcess, 1);
+		CloseHandle(output_read);
 		CloseHandle(process.hThread);
 		CloseHandle(process.hProcess);
 		CloseHandle(job);
@@ -145,10 +181,35 @@ bool run_process(const std::filesystem::path &executable, const std::vector<std:
 		return false;
 	}
 	ResumeThread(process.hThread);
+	const auto drain_output = [&]
+	{
+		char buffer[4096];
+		for (;;)
+		{
+			DWORD available = 0;
+			if (!PeekNamedPipe(output_read, nullptr, 0, nullptr, &available, nullptr))
+			{
+				return GetLastError() == ERROR_BROKEN_PIPE;
+			}
+			if (available == 0)
+			{
+				return true;
+			}
+			DWORD read = 0;
+			if (!ReadFile(output_read, buffer, std::min<DWORD>(available, static_cast<DWORD>(sizeof(buffer))), &read, nullptr))
+			{
+				return GetLastError() == ERROR_BROKEN_PIPE;
+			}
+			append_output_tail(result.output_tail, buffer, read);
+		}
+	};
+	bool output_ok = true;
 	for (;;)
 	{
+		output_ok = drain_output() && output_ok;
 		if (WaitForSingleObject(process.hProcess, 10) == WAIT_OBJECT_0)
 		{
+			output_ok = drain_output() && output_ok;
 			break;
 		}
 		if (cancel != nullptr && cancel->load())
@@ -156,6 +217,7 @@ bool run_process(const std::filesystem::path &executable, const std::vector<std:
 			result.cancelled = true;
 			TerminateJobObject(job, 1);
 			WaitForSingleObject(process.hProcess, INFINITE);
+			output_ok = drain_output() && output_ok;
 			break;
 		}
 		if (timeout.count() > 0 && std::chrono::steady_clock::now() - started >= timeout)
@@ -163,15 +225,22 @@ bool run_process(const std::filesystem::path &executable, const std::vector<std:
 			result.timed_out = true;
 			TerminateJobObject(job, 1);
 			WaitForSingleObject(process.hProcess, INFINITE);
+			output_ok = drain_output() && output_ok;
 			break;
 		}
 	}
 	DWORD exit_code = 1;
 	GetExitCodeProcess(process.hProcess, &exit_code);
 	result.exit_code = static_cast<int>(exit_code);
+	CloseHandle(output_read);
 	CloseHandle(process.hThread);
 	CloseHandle(process.hProcess);
 	CloseHandle(job);
+	if (!output_ok)
+	{
+		error = "could not read process output";
+		return false;
+	}
 #else
 	std::string executable_string = executable.string();
 	std::vector<std::string> values;
@@ -185,29 +254,74 @@ bool run_process(const std::filesystem::path &executable, const std::vector<std:
 		argv.push_back(value.data());
 	}
 	argv.push_back(nullptr);
+	int output_pipe[2] {-1, -1};
+	if (pipe(output_pipe) != 0 || fcntl(output_pipe[0], F_SETFL, O_NONBLOCK) != 0)
+	{
+		if (output_pipe[0] >= 0) close(output_pipe[0]);
+		if (output_pipe[1] >= 0) close(output_pipe[1]);
+		error = std::string("could not create process output pipe: ") + std::strerror(errno);
+		return false;
+	}
+	posix_spawn_file_actions_t file_actions;
+	posix_spawn_file_actions_init(&file_actions);
+	posix_spawn_file_actions_adddup2(&file_actions, output_pipe[1], STDOUT_FILENO);
+	posix_spawn_file_actions_adddup2(&file_actions, output_pipe[1], STDERR_FILENO);
+	posix_spawn_file_actions_addclose(&file_actions, output_pipe[0]);
+	posix_spawn_file_actions_addclose(&file_actions, output_pipe[1]);
 	posix_spawnattr_t attributes;
 	posix_spawnattr_init(&attributes);
 	posix_spawnattr_setflags(&attributes, POSIX_SPAWN_SETPGROUP);
 	posix_spawnattr_setpgroup(&attributes, 0);
 	pid_t pid = 0;
-	const int spawn_error = posix_spawn(&pid, executable_string.c_str(), nullptr, &attributes, argv.data(), environ);
+	const int spawn_error = posix_spawn(&pid, executable_string.c_str(), &file_actions, &attributes, argv.data(), environ);
+	posix_spawn_file_actions_destroy(&file_actions);
 	posix_spawnattr_destroy(&attributes);
+	close(output_pipe[1]);
 	if (spawn_error != 0)
 	{
+		close(output_pipe[0]);
 		error = std::string("could not start process: ") + std::strerror(spawn_error);
 		return false;
 	}
+	const auto drain_output = [&]
+	{
+		char buffer[4096];
+		for (;;)
+		{
+			const ssize_t count = read(output_pipe[0], buffer, sizeof(buffer));
+			if (count > 0)
+			{
+				append_output_tail(result.output_tail, buffer, static_cast<size_t>(count));
+				continue;
+			}
+			if (count == 0 || errno == EAGAIN || errno == EWOULDBLOCK)
+			{
+				return true;
+			}
+			if (errno != EINTR)
+			{
+				return false;
+			}
+		}
+	};
 	int status = 0;
+	bool output_ok = true;
 	for (;;)
 	{
+		output_ok = drain_output() && output_ok;
 		const pid_t waited = waitpid(pid, &status, WNOHANG);
 		if (waited == pid)
 		{
+			output_ok = drain_output() && output_ok;
 			break;
 		}
 		if (waited < 0 && errno != EINTR)
 		{
-			error = std::string("could not wait for process: ") + std::strerror(errno);
+			const int wait_error = errno;
+			kill(-pid, SIGKILL);
+			waitpid(pid, &status, 0);
+			close(output_pipe[0]);
+			error = std::string("could not wait for process: ") + std::strerror(wait_error);
 			return false;
 		}
 		if (cancel != nullptr && cancel->load())
@@ -215,6 +329,7 @@ bool run_process(const std::filesystem::path &executable, const std::vector<std:
 			result.cancelled = true;
 			kill(-pid, SIGKILL);
 			waitpid(pid, &status, 0);
+			output_ok = drain_output() && output_ok;
 			break;
 		}
 		if (timeout.count() > 0 && std::chrono::steady_clock::now() - started >= timeout)
@@ -222,12 +337,19 @@ bool run_process(const std::filesystem::path &executable, const std::vector<std:
 			result.timed_out = true;
 			kill(-pid, SIGKILL);
 			waitpid(pid, &status, 0);
+			output_ok = drain_output() && output_ok;
 			break;
 		}
 		std::this_thread::sleep_for(std::chrono::milliseconds(10));
 	}
+	close(output_pipe[0]);
 	result.exit_code = WIFEXITED(status) ? WEXITSTATUS(status) : -1;
 	(void)low_priority;
+	if (!output_ok)
+	{
+		error = "could not read process output";
+		return false;
+	}
 #endif
 	return true;
 }

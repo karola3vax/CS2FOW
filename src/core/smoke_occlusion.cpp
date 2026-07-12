@@ -19,6 +19,11 @@ constexpr float k_block_density = 0.2f;
 constexpr float k_visual_timing_margin = 0.5f;
 constexpr uint32_t k_max_steps = 128;
 
+bool finite(vec3 value)
+{
+	return std::isfinite(value.x) && std::isfinite(value.y) && std::isfinite(value.z);
+}
+
 float smoothstep(float value)
 {
 	value = std::clamp(value, 0.0f, 1.0f);
@@ -248,6 +253,11 @@ bool copy_smoke_frame(const std::byte *storage, int32_t frame, vec3 center, floa
 bool smoke_line_blocked(const smoke_snapshot &snapshot, vec3 origin, vec3 target, float age_advance_seconds,
 	const bvh8_data *geometry)
 {
+	const vec3 direction {target.x - origin.x, target.y - origin.y, target.z - origin.z};
+	if (!finite(origin) || !finite(target) || !finite(direction))
+	{
+		return false;
+	}
 	float total = 0.0f;
 	for (const smoke_volume_snapshot &volume : snapshot.volumes)
 	{

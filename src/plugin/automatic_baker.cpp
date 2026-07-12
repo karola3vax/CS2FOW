@@ -99,12 +99,14 @@ void automatic_baker::run(bake_request request)
 	if (process.timed_out)
 	{
 		completion.error = "automatic baker timed out";
+		if (!process.output_tail.empty()) completion.error += "\n" + process.output_tail;
 		finish(std::move(completion));
 		return;
 	}
 	if (process.exit_code != 0)
 	{
 		completion.error = "automatic baker exited with code " + std::to_string(process.exit_code);
+		if (!process.output_tail.empty()) completion.error += "\n" + process.output_tail;
 		finish(std::move(completion));
 		return;
 	}

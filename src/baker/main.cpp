@@ -113,11 +113,13 @@ bool invoke_vrf(const arguments &args, const std::vector<std::string> &arguments
 	if (result.timed_out)
 	{
 		error = "VRF CLI timed out";
+		if (!result.output_tail.empty()) error += "\n" + result.output_tail;
 		return false;
 	}
 	if (result.exit_code != 0)
 	{
 		error = "VRF CLI failed with exit code " + std::to_string(result.exit_code);
+		if (!result.output_tail.empty()) error += "\n" + result.output_tail;
 		return false;
 	}
 	return true;

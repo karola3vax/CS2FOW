@@ -98,6 +98,26 @@ void test_visibility_pair_eligibility()
 	assert(!visibility_pair_enabled(0, 0, t, ct, true));
 	assert(!visibility_pair_enabled(0, 1, invalid, ct, true));
 	assert(!visibility_pair_enabled(0, 1, t, invalid, true));
+	player_state numbers = t;
+	numbers.eye = {};
+	numbers.origin = {};
+	numbers.velocity = {};
+	numbers.mins = {-16, -16, 0};
+	numbers.maxs = {16, 16, 72};
+	assert(valid_player_numbers(numbers));
+	const float nan = std::numeric_limits<float>::quiet_NaN();
+	const float infinity = std::numeric_limits<float>::infinity();
+	numbers.eye.x = nan;
+	assert(!valid_player_numbers(numbers));
+	numbers.eye.x = 0;
+	numbers.velocity.y = infinity;
+	assert(!valid_player_numbers(numbers));
+	numbers.velocity.y = 0;
+	numbers.rtt_seconds = nan;
+	assert(!valid_player_numbers(numbers));
+	numbers.rtt_seconds = 0;
+	numbers.mins.x = 17;
+	assert(!valid_player_numbers(numbers));
 }
 
 void test_smoke_occlusion()
@@ -122,6 +142,12 @@ void test_smoke_occlusion()
 	assert(smoke_line_blocked(smoke, {-100, 0, 0}, {100, 0, 0}));
 	assert(smoke_line_blocked(smoke, {100, 0, 0}, {-100, 0, 0}));
 	assert(!smoke_line_blocked(smoke, {400, 0, 0}, {500, 0, 0}));
+	const float nan = std::numeric_limits<float>::quiet_NaN();
+	const float infinity = std::numeric_limits<float>::infinity();
+	const float maximum = std::numeric_limits<float>::max();
+	assert(!smoke_line_blocked(smoke, {nan, 0, 0}, {100, 0, 0}));
+	assert(!smoke_line_blocked(smoke, {-100, 0, 0}, {infinity, 0, 0}));
+	assert(!smoke_line_blocked(smoke, {-maximum, 0, 0}, {maximum, 0, 0}));
 
 	volume.density.fill(5.0f);
 	assert(!smoke_line_blocked(smoke, {-100, 0, 0}, {100, 0, 0}));

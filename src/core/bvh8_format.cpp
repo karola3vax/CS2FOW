@@ -181,6 +181,36 @@ uint32_t crc32_extend(uint32_t previous_crc, std::span<const std::byte> bytes)
 	return ~value;
 }
 
+bool file_crc32(const std::filesystem::path &path, uint64_t &size, uint32_t &checksum, std::string &error)
+{
+	size = 0;
+	checksum = 0;
+	error.clear();
+	std::ifstream stream(path, std::ios::binary);
+	if (!stream)
+	{
+		error = "could not open file for CRC32";
+		return false;
+	}
+	std::array<std::byte, 64u * 1024u> buffer;
+	while (stream)
+	{
+		stream.read(reinterpret_cast<char *>(buffer.data()), static_cast<std::streamsize>(buffer.size()));
+		const std::streamsize count = stream.gcount();
+		if (count > 0)
+		{
+			checksum = crc32_extend(checksum, std::span<const std::byte>(buffer.data(), static_cast<size_t>(count)));
+			size += static_cast<uint64_t>(count);
+		}
+	}
+	if (!stream.eof())
+	{
+		error = "failed while reading file for CRC32";
+		return false;
+	}
+	return true;
+}
+
 bool validate_bvh8(const bvh8_data &data, std::string &error)
 {
 	error.clear();

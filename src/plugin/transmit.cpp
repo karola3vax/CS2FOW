@@ -154,11 +154,9 @@ void plugin::reset_transmit_state(bool clear_debug_records)
 		}
 	}
 	aux_visual_count_ = 0;
-	for (aux_visual_entity &entity : aux_visual_entities_)
-	{
-		entity = {};
-	}
 	he_clearance_history_.clear();
+	capture_timing_ = {};
+	transmit_timing_ = {};
 	if (clear_debug_records)
 	{
 		recent_hides_.clear();
@@ -171,6 +169,11 @@ void plugin::hook_check_transmit(CCheckTransmitInfo **infos, int count, CBitVec<
 	{
 		return;
 	}
+	const auto timing_started = std::chrono::steady_clock::now();
+	const auto record_timing = [&]
+	{
+		transmit_timing_.record(std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - timing_started).count());
+	};
 	const std::shared_ptr<const visibility_result> result = worker_.result();
 	const auto now = std::chrono::steady_clock::now();
 	std::lock_guard<std::mutex> lock(transmit_state_mutex_);
@@ -194,11 +197,13 @@ void plugin::hook_check_transmit(CCheckTransmitInfo **infos, int count, CBitVec<
 	}
 	if (!result || !visibility_snapshot_fresh(result->captured, now, 0.0f))
 	{
+		record_timing();
 		return;
 	}
 	CGameEntitySystem *system = entity_system();
 	if (system == nullptr)
 	{
+		record_timing();
 		return;
 	}
 	const auto current_player_pawn = [&](uint32_t slot, const player_state &saved)
@@ -296,6 +301,7 @@ void plugin::hook_check_transmit(CCheckTransmitInfo **infos, int count, CBitVec<
 			clear_group(system, info->m_pTransmitEntity, cache.group, slot, hide_reason::current, now);
 		}
 	}
+	record_timing();
 }
 
 void plugin::print_entities(int edict)

@@ -1,4 +1,5 @@
 #include "test_suites.h"
+#include "subprocess.h"
 
 // Tiny test entry point: creates a temporary workspace, runs the map/BVH and
 // visibility/transmit suites, prints one benchmark, and removes test files.
@@ -23,10 +24,18 @@ int main(int argc, char **argv)
 {
 	if (argc == 3 && std::strcmp(argv[1], "--process-probe") == 0)
 	{
+		std::cout << "probe stdout\n" << std::flush;
+		std::cerr << "probe stderr\n" << std::flush;
 		return std::strcmp(argv[2], "space [test]") == 0 ? 23 : 24;
+	}
+	if (argc == 2 && std::strcmp(argv[1], "--process-flood") == 0)
+	{
+		std::cout << "HEAD-MARKER\n" << std::string(k_process_output_tail_bytes + 1024u, 'x') << "\nTAIL-MARKER\n";
+		return 25;
 	}
 	if (argc == 2 && std::strcmp(argv[1], "--process-sleep") == 0)
 	{
+		std::cout << "sleep probe\n" << std::flush;
 		std::this_thread::sleep_for(std::chrono::seconds(10));
 		return 0;
 	}

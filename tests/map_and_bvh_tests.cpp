@@ -203,15 +203,55 @@ void test_vpk(const std::filesystem::path &directory)
 	assert(!list_vpk_entries(invalid_terminator, entries, error));
 }
 
-void test_subprocess(const std::filesystem::path &executable)
+void test_file_crc32(const std::filesystem::path &directory)
+{
+	const std::filesystem::path known = directory / "known-crc.bin";
+	std::ofstream(known, std::ios::binary) << "123456789";
+	uint64_t size = 0;
+	uint32_t checksum = 0;
+	std::string error;
+	assert(file_crc32(known, size, checksum, error));
+	const auto matches = [&](uint64_t expected_size, uint32_t expected_checksum)
+	{
+		return size == expected_size && checksum == expected_checksum;
+	};
+	assert(matches(9, 0xcbf43926u));
+	assert(!matches(10, 0xcbf43926u));
+	assert(!matches(9, 0x12345678u));
+
+	const std::filesystem::path empty = directory / "empty.bin";
+	std::ofstream(empty, std::ios::binary);
+	assert(file_crc32(empty, size, checksum, error));
+	assert(size == 0 && checksum == 0);
+	assert(!file_crc32(directory / "missing.bin", size, checksum, error));
+	assert(!file_crc32(directory, size, checksum, error));
+}
+
+void test_subprocess(const std::filesystem::path &directory, const std::filesystem::path &executable)
 {
 	process_result result;
 	std::string error;
 	assert(run_process(executable, {"--process-probe", "space [test]"}, std::chrono::seconds(5), nullptr, false, result, error));
 	assert(result.exit_code == 23 && !result.cancelled && !result.timed_out);
+	assert(result.output_tail.find("probe stdout") != std::string::npos);
+	assert(result.output_tail.find("probe stderr") != std::string::npos);
+
+	assert(run_process(executable, {"--process-flood"}, std::chrono::seconds(5), nullptr, false, result, error));
+	assert(result.exit_code == 25 && result.output_tail.size() <= k_process_output_tail_bytes);
+	assert(result.output_tail.find("HEAD-MARKER") == std::string::npos);
+	assert(result.output_tail.find("TAIL-MARKER") != std::string::npos);
+
+	const std::filesystem::path spaced_directory = directory / "process path";
+	std::filesystem::create_directories(spaced_directory);
+	const std::filesystem::path spaced_executable = spaced_directory / executable.filename();
+	std::filesystem::copy_file(executable, spaced_executable, std::filesystem::copy_options::overwrite_existing);
+	std::filesystem::permissions(spaced_executable, std::filesystem::status(executable).permissions());
+	assert(run_process(spaced_executable, {"--process-probe", "space [test]"}, std::chrono::seconds(5), nullptr, false, result, error));
+	assert(result.exit_code == 23);
 
 	assert(run_process(executable, {"--process-sleep"}, std::chrono::milliseconds(50), nullptr, false, result, error));
 	assert(result.timed_out);
+	assert(result.output_tail.find("sleep probe") != std::string::npos);
 
 	std::atomic_bool cancel {false};
 	std::thread canceller([&] {
@@ -221,6 +261,7 @@ void test_subprocess(const std::filesystem::path &executable)
 	assert(run_process(executable, {"--process-sleep"}, std::chrono::seconds(5), &cancel, false, result, error));
 	canceller.join();
 	assert(result.cancelled);
+	assert(result.output_tail.find("sleep probe") != std::string::npos);
 }
 
 void write_test_glb(const std::filesystem::path &path, const std::string &surface_property, bool include_surface_property = true)
@@ -367,7 +408,8 @@ void test_bvh(const std::filesystem::path &directory)
 void run_map_and_bvh_tests(const std::filesystem::path &directory, const std::filesystem::path &test_executable)
 {
 	test_vpk(directory);
-	test_subprocess(test_executable);
+	test_file_crc32(directory);
+	test_subprocess(directory, test_executable);
 	test_glb(directory);
 	test_bvh(directory);
 }

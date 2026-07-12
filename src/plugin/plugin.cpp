@@ -60,6 +60,29 @@ void *module_base(const void *address)
 #endif
 }
 
+std::filesystem::path module_path(const void *address)
+{
+#if defined(_WIN32)
+	HMODULE module {};
+	if (!GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+		reinterpret_cast<LPCSTR>(address), &module))
+	{
+		return {};
+	}
+	std::wstring path(32768, L'\0');
+	const DWORD length = GetModuleFileNameW(module, path.data(), static_cast<DWORD>(path.size()));
+	if (length == 0 || length >= path.size())
+	{
+		return {};
+	}
+	path.resize(length);
+	return path;
+#else
+	Dl_info info {};
+	return dladdr(address, &info) != 0 && info.dli_fname != nullptr ? std::filesystem::path(info.dli_fname) : std::filesystem::path {};
+#endif
+}
+
 void on_cs2fow_enable_changed(CConVar<bool> *, CSplitScreenSlot, const bool *new_value, const bool *old_value)
 {
 	if (new_value != nullptr && old_value != nullptr && *new_value != *old_value)
@@ -165,7 +188,7 @@ bool plugin::Load(PluginId id, ISmmAPI *ismm, char *error, size_t maxlen, bool l
 
 	std::string reason;
 	const bool avx = cpu_supports_avx();
-	prerequisites_valid_ = avx && read_gamedata(reason) && resolve_schema(reason);
+	prerequisites_valid_ = avx && read_gamedata(reason) && verify_server_binary(reason) && resolve_schema(reason);
 	if (prerequisites_valid_ && game_event_manager_vtable_rva_ != 0)
 	{
 		void *base = module_base(*reinterpret_cast<void **>(game_entities_));
@@ -261,12 +284,16 @@ bool plugin::read_gamedata(std::string &error)
 	}
 	recipient_slot_offset_ = 0;
 	entity_system_offset_ = 0;
+	server_binary_size_ = 0;
+	server_binary_crc32_ = 0;
 	transmit_offsets_ = {};
 	smoke_layout_ = {};
 	game_event_manager_vtable_rva_ = 0;
 	smoke_gamedata_available_ = true;
 #if defined(_WIN32)
 	constexpr std::string_view k_recipient_key = "recipient_slot_offset_windows";
+	constexpr std::string_view k_server_size_key = "server_binary_size_windows";
+	constexpr std::string_view k_server_crc_key = "server_binary_crc32_windows";
 	constexpr std::string_view k_entity_system_key = "game_entity_system_offset_windows";
 	constexpr std::string_view k_full_update_key = "checktransmit_full_update_offset_windows";
 	constexpr std::string_view k_smoke_volume_key = "smoke_volume_offset_windows";
@@ -277,6 +304,8 @@ bool plugin::read_gamedata(std::string &error)
 	constexpr std::string_view k_game_event_vtable_key = "game_event_manager_vtable_rva_windows";
 #else
 	constexpr std::string_view k_recipient_key = "recipient_slot_offset_linux";
+	constexpr std::string_view k_server_size_key = "server_binary_size_linux";
+	constexpr std::string_view k_server_crc_key = "server_binary_crc32_linux";
 	constexpr std::string_view k_entity_system_key = "game_entity_system_offset_linux";
 	constexpr std::string_view k_full_update_key = "checktransmit_full_update_offset_linux";
 	constexpr std::string_view k_smoke_volume_key = "smoke_volume_offset_linux";
@@ -297,7 +326,7 @@ bool plugin::read_gamedata(std::string &error)
 		const std::string key = line.substr(0, equals);
 		const bool smoke_key = key == k_smoke_volume_key || key == k_smoke_storage_key || key == k_smoke_frame_key
 			|| key == k_smoke_center_key || key == k_smoke_start_time_key;
-		if (key != k_recipient_key && key != k_entity_system_key && key != k_full_update_key
+		if (key != k_server_size_key && key != k_server_crc_key && key != k_recipient_key && key != k_entity_system_key && key != k_full_update_key
 			&& key != k_game_event_vtable_key && !smoke_key)
 		{
 			continue;
@@ -314,6 +343,8 @@ bool plugin::read_gamedata(std::string &error)
 			error = "invalid gamedata value for " + key;
 			return false;
 		}
+		if (key == k_server_size_key) server_binary_size_ = value;
+		if (key == k_server_crc_key) server_binary_crc32_ = value;
 		if (key == k_recipient_key) recipient_slot_offset_ = value;
 		if (key == k_entity_system_key) entity_system_offset_ = value;
 		if (key == k_full_update_key) transmit_offsets_.full_update_offset = value;
@@ -324,9 +355,10 @@ bool plugin::read_gamedata(std::string &error)
 		if (key == k_smoke_start_time_key) smoke_layout_.start_time = value;
 		if (key == k_game_event_vtable_key) game_event_manager_vtable_rva_ = value;
 	}
-	if (recipient_slot_offset_ == 0 || entity_system_offset_ == 0 || transmit_offsets_.full_update_offset == 0)
+	if (server_binary_size_ == 0 || server_binary_crc32_ == 0 || recipient_slot_offset_ == 0
+		|| entity_system_offset_ == 0 || transmit_offsets_.full_update_offset == 0)
 	{
-		error = "gamedata does not contain this platform's required offsets";
+		error = "gamedata does not contain this platform's required values";
 		return false;
 	}
 	if (recipient_slot_offset_ < sizeof(CCheckTransmitInfo) || recipient_slot_offset_ > k_max_gamedata_offset || recipient_slot_offset_ % alignof(int) != 0
@@ -345,6 +377,41 @@ bool plugin::read_gamedata(std::string &error)
 	if (!valid_gamedata_offset(game_event_manager_vtable_rva_, static_cast<uint32_t>(alignof(void *)), k_max_module_rva))
 	{
 		game_event_manager_vtable_rva_ = 0;
+	}
+	return true;
+}
+
+bool plugin::verify_server_binary(std::string &error)
+{
+	std::ostringstream expected;
+	expected << "expected size=" << server_binary_size_ << " crc=0x" << std::hex << server_binary_crc32_;
+	if (game_entities_ == nullptr)
+	{
+		error = "server game-entities interface is unavailable; " + expected.str() + ", actual unavailable";
+		return false;
+	}
+	const std::filesystem::path path = module_path(*reinterpret_cast<void **>(game_entities_));
+	if (path.empty())
+	{
+		error = "could not resolve the loaded server binary path; " + expected.str() + ", actual unavailable";
+		return false;
+	}
+	uint64_t actual_size = 0;
+	uint32_t actual_crc = 0;
+	std::string fingerprint_error;
+	if (!file_crc32(path, actual_size, actual_crc, fingerprint_error))
+	{
+		error = "could not verify loaded server binary: " + fingerprint_error + "; " + expected.str() + ", actual unavailable";
+		return false;
+	}
+	if (actual_size != server_binary_size_ || actual_crc != server_binary_crc32_)
+	{
+		std::ostringstream message;
+		message << "server binary does not match verified gamedata: expected size=" << server_binary_size_
+			<< " crc=0x" << std::hex << server_binary_crc32_ << std::dec << ", actual size=" << actual_size
+			<< " crc=0x" << std::hex << actual_crc;
+		error = message.str();
+		return false;
 	}
 	return true;
 }
@@ -559,10 +626,16 @@ void plugin::hook_game_frame(bool simulating, bool first_tick, bool last_tick)
 	visibility_snapshot value;
 	CGlobalVars *globals = network_server->GetGlobals();
 	const float game_time = globals == nullptr ? std::numeric_limits<float>::quiet_NaN() : globals->curtime;
+	const auto capture_started = std::chrono::steady_clock::now();
 	if (!capture(value, game_time))
 	{
 		disable("game entity system is unavailable");
 		return;
+	}
+	const double capture_ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - capture_started).count();
+	{
+		std::lock_guard<std::mutex> lock(transmit_state_mutex_);
+		capture_timing_.record(capture_ms);
 	}
 	last_snapshot_ = now;
 	worker_.submit(std::move(value), static_cast<uint32_t>(cs2fow_visibility_hold_ms.Get()), {
@@ -580,6 +653,13 @@ void plugin::print_status() const
 {
 	const worker_stats stats = worker_.stats();
 	const std::shared_ptr<const visibility_result> result = worker_.result();
+	runtime_timing_stats capture_timing;
+	runtime_timing_stats transmit_timing;
+	{
+		std::lock_guard<std::mutex> lock(transmit_state_mutex_);
+		capture_timing = capture_timing_;
+		transmit_timing = transmit_timing_;
+	}
 	const double age_ms = result ? std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - result->captured).count() : -1.0;
 	META_CONPRINTF("[CS2FOW] %s; map=%s crc=0x%08x version=%u triangles=%u nodes=%u packets=%u bytes=%llu depth=%u\n",
 		disabled_reason_.empty() && cs2fow_enable.Get() ? "active" : (disabled_reason_.empty() ? "disabled by convar" : disabled_reason_.c_str()), map_.c_str(),
@@ -588,9 +668,15 @@ void plugin::print_status() const
 	META_CONPRINTF("[CS2FOW] worker latest=%.3fms average=%.3fms maximum=%.3fms snapshot_age=%.1fms pairs=%u visible=%u hidden=%u cycles=%llu\n",
 		stats.latest_ms, stats.average_ms, stats.maximum_ms, age_ms, stats.evaluated_pairs, stats.visible_pairs, stats.hidden_pairs,
 		static_cast<unsigned long long>(stats.cycles));
+	META_CONPRINTF("[CS2FOW] capture latest=%.3fms average=%.3fms maximum=%.3fms calls=%llu\n",
+		capture_timing.latest_ms, capture_timing.average_ms(), capture_timing.maximum_ms,
+		static_cast<unsigned long long>(capture_timing.calls));
+	META_CONPRINTF("[CS2FOW] transmit latest=%.3fms average=%.3fms maximum=%.3fms calls=%llu\n",
+		transmit_timing.latest_ms, transmit_timing.average_ms(), transmit_timing.maximum_ms,
+		static_cast<unsigned long long>(transmit_timing.calls));
 	const bool smoke_available = result != nullptr ? result->smoke_available
 		: smoke_gamedata_available_ && smoke_schema_available_;
-	META_CONPRINTF("[CS2FOW] smoke enabled=%d available=%d captured=%u he_listener=%d he_clears=%u\n",
+	META_CONPRINTF("[CS2FOW] smoke enabled=%d available=%d captured=%u he_listener=%d he_active=%u\n",
 		cs2fow_smoke_occlusion.Get() ? 1 : 0, smoke_available ? 1 : 0, result == nullptr ? 0u : result->smoke_count,
 		he_event_available_ ? 1 : 0, result == nullptr ? 0u : result->he_clearance_count);
 	META_CONPRINTF("[CS2FOW] teammate filtering=%d\n", cs2fow_filter_teammates.Get() ? 1 : 0);

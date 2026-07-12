@@ -87,6 +87,8 @@ The first load may say that an automatic bake is in progress. The server remains
 
 CS2FOW requires an x86-64 CPU with AVX support exposed to the operating system. Some virtual-server providers hide AVX even when the physical CPU supports it.
 
+The plugin also verifies that its private gamedata matches the loaded CS2 server binary by file size and CRC32. After an unknown Valve update, CS2FOW stays disabled and sends everyone normally until updated gamedata is installed.
+
 ## What CS2FOW does
 
 CS2FOW runs only on the server. Players install nothing.
@@ -159,7 +161,7 @@ Automatic baking needs write access to `addons/cs2fow/data/maps`. On Linux, the 
 
 ## Status and debug commands
 
-`cs2fow_status` prints whether the plugin is active, why it is fail open when inactive, map and bake details, worker timings, true snapshot age, pair counts, smoke and HE-event availability, active HE clearances, teammate-filtering state, and automatic-bake progress.
+`cs2fow_status` prints whether the plugin is active, why it is fail open when inactive, map and bake details, worker, snapshot-capture, and CheckTransmit timings, true snapshot age, pair counts, smoke and HE-event availability, active HE events, teammate-filtering state, and automatic-bake progress.
 
 `cs2fow_debug 1` starts silent evidence collection. It adds a record only when CS2FOW found a primary transmit bit set immediately before clearing it. It does not print every clear.
 
@@ -179,6 +181,7 @@ Records show the classname, relationship to the pawn (`direct`, `owner_link`, `e
 
 Important limits:
 
+- Private offsets are accepted only for the exact Windows or Linux server binary recorded in the bundled gamedata. Unknown builds disable CS2FOW instead of attempting unsafe reads.
 - Visibility uses baked static map geometry. Smokes, doors, breakables, props, particles, projectiles, and other moving blockers are not occluders.
 - Movement prediction targets normal competitive/casual CS2 movement. It ramps from zero between 75 and 100 horizontal units per second, caps speed at 350, and caps each player's offset at 96 units, so surf, KZ, and unusually fast boosts can appear late.
 - Shoulder origins deliberately widen with recipient RTT to reduce high-ping corner pop-in. Larger values reveal enemies farther around corners, including while the recipient is stationary.
@@ -197,6 +200,10 @@ Important limits:
 chmod +x game/csgo/tools/cs2fow_baker
 chmod +x game/csgo/tools/vrf/linux64/Source2Viewer-CLI
 ```
+
+Automatic-baker and VRF failures include the final 8 KiB of their combined output so the useful error is available without successful-bake console spam.
+
+**`cs2fow_status` says the server binary does not match:** install a CS2FOW build with gamedata verified for the current Valve server binary. There is no unsafe override.
 
 **A bake is rejected after a CS2 update:** this is expected when Valve changes the source VPK. CS2FOW compares the stored source CRC and size to the mounted map and rebakes instead of trusting stale walls.
 

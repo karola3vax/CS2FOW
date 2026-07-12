@@ -21,7 +21,7 @@ type &field(void *object, uint32_t offset)
 	return *reinterpret_cast<type *>(reinterpret_cast<uintptr_t>(object) + offset);
 }
 
-bool find_field_recursive(SchemaClassInfoData_t *class_info, const char *name, uint32_t &offset)
+bool find_declared_field(SchemaClassInfoData_t *class_info, const char *name, uint32_t &offset)
 {
 	if (class_info == nullptr)
 	{
@@ -32,13 +32,6 @@ bool find_field_recursive(SchemaClassInfoData_t *class_info, const char *name, u
 		if (std::strcmp(class_info->m_pFields[i].m_pszName, name) == 0)
 		{
 			offset = class_info->m_pFields[i].m_nSingleInheritanceOffset;
-			return true;
-		}
-	}
-	for (int i = 0; i < class_info->m_nBaseClassCount; ++i)
-	{
-		if (find_field_recursive(class_info->m_pBaseClasses[i].m_pClass, name, offset))
-		{
 			return true;
 		}
 	}
@@ -56,7 +49,7 @@ bool resolve_field(ISchemaSystem *schema, const char *class_name, const char *fi
 	{
 		return false;
 	}
-	return find_field_recursive(scope->FindDeclaredClass(class_name).Get(), field_name, offset);
+	return find_declared_field(scope->FindDeclaredClass(class_name).Get(), field_name, offset);
 }
 
 vec3 to_vec3(const Vector &value)
@@ -309,8 +302,6 @@ void plugin::refresh_entity_caches(CGameEntitySystem *system,
 		record.child = child;
 		record.owner = owner;
 		record.effect = effect;
-		record.edict = edict;
-		copy_entity_name(entity, record.name);
 	}
 }
 
@@ -478,8 +469,7 @@ bool plugin::capture(visibility_snapshot &value, float game_time)
 		{
 			continue;
 		}
-		player_state &player = value.players[slot];
-		player.valid = true;
+		player_state player;
 		player.team = live.team;
 		player.pawn_entity = live.pawn_entity;
 		player.origin = to_vec3(field<Vector>(scene_node, fields_.abs_origin));
@@ -492,8 +482,15 @@ bool plugin::capture(visibility_snapshot &value, float game_time)
 		player.muzzle_class = active_weapon_muzzle_class(system, pawn_entity);
 		if (INetChannelInfo *channel = engine_->GetPlayerNetInfo(CPlayerSlot(static_cast<int>(slot))); channel != nullptr)
 		{
-			player.rtt_seconds = std::max(0.0f, channel->GetEngineLatency());
+			player.rtt_seconds = channel->GetEngineLatency();
 		}
+		if (!valid_player_numbers(player))
+		{
+			continue;
+		}
+		player.rtt_seconds = std::max(0.0f, player.rtt_seconds);
+		player.valid = true;
+		value.players[slot] = player;
 	}
 	for (uint32_t recipient = 0; recipient < k_max_players; ++recipient)
 	{

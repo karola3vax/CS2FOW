@@ -35,7 +35,6 @@ namespace cs2fow
 inline constexpr uint32_t k_max_weapons = 64;
 inline constexpr uint32_t k_max_wearables = 32;
 inline constexpr uint32_t k_max_aux_visual_group_entities = 32;
-inline constexpr uint32_t k_max_aux_visual_cache_entities = 2048;
 inline constexpr uint32_t k_max_recent_hide_records = 256;
 inline constexpr uint32_t k_entity_scan_hard_limit = MAX_TOTAL_ENTITIES;
 inline constexpr uint32_t k_max_entity_name = 64;
@@ -127,10 +126,27 @@ enum class hide_reason : uint8_t
 	quarantine
 };
 
-struct aux_visual_entity : owner_effect_link<CEntityHandle>
+using aux_visual_entity = owner_effect_link<CEntityHandle>;
+
+struct runtime_timing_stats
 {
-	int edict {-1};
-	char name[k_max_entity_name] {};
+	double latest_ms {};
+	double total_ms {};
+	double maximum_ms {};
+	uint64_t calls {};
+
+	void record(double milliseconds)
+	{
+		latest_ms = milliseconds;
+		total_ms += milliseconds;
+		if (milliseconds > maximum_ms) maximum_ms = milliseconds;
+		++calls;
+	}
+
+	double average_ms() const
+	{
+		return calls == 0 ? 0.0 : total_ms / static_cast<double>(calls);
+	}
 };
 
 using recent_hide_log = transmit_debug_log<k_max_recent_hide_records, k_max_entity_name>;
@@ -177,6 +193,7 @@ public:
 
 private:
 	bool read_gamedata(std::string &error);
+	bool verify_server_binary(std::string &error);
 	bool resolve_schema(std::string &error);
 	bool resolve_map_source(const std::string &map, map_source &source, std::string &error) const;
 	bool load_map_bake(const std::filesystem::path &path, const std::string &map, const map_source &source,
@@ -217,6 +234,8 @@ private:
 	uint32_t recipient_slot_offset_ {};
 	uint32_t entity_system_offset_ {};
 	uint32_t game_event_manager_vtable_rva_ {};
+	uint32_t server_binary_size_ {};
+	uint32_t server_binary_crc32_ {};
 	checktransmit_private_offsets transmit_offsets_;
 	smoke_private_layout smoke_layout_;
 	int game_frame_hook_id_ {};
@@ -234,14 +253,16 @@ private:
 	bool smoke_gamedata_available_ {};
 	bool he_event_available_ {};
 	he_clearance_history he_clearance_history_;
-	std::array<aux_visual_entity, k_max_aux_visual_cache_entities> aux_visual_entities_;
+	std::array<aux_visual_entity, MAX_EDICTS> aux_visual_entities_;
 	size_t aux_visual_count_ {};
 	recent_hide_log recent_hides_;
 	std::array<lifecycle_guard, k_max_players> lifecycle_;
 	std::array<std::array<pair_guard, k_max_players>, k_max_players> pair_guards_;
 	std::array<std::array<visual_entity_group, k_max_players>, k_max_players> hidden_groups_;
 	std::array<target_transmit_cache, k_max_players> transmit_target_cache_;
-	std::mutex transmit_state_mutex_;
+	mutable std::mutex transmit_state_mutex_;
+	runtime_timing_stats capture_timing_;
+	runtime_timing_stats transmit_timing_;
 	std::chrono::steady_clock::time_point last_snapshot_ {};
 	uint64_t snapshot_sequence_ {};
 	bool prerequisites_valid_ {};
