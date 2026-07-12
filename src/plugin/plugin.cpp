@@ -226,12 +226,12 @@ int plugin::hook_load_events_from_file(const char *, bool)
 
 void plugin::FireGameEvent(IGameEvent *event)
 {
-	if (event == nullptr || std::strcmp(event->GetName(), "hegrenade_detonate") != 0
-		|| !event->HasKey("x") || !event->HasKey("y") || !event->HasKey("z"))
+	if (event == nullptr || std::strcmp(event->GetName(), "hegrenade_detonate") != 0)
 	{
 		return;
 	}
-	const vec3 center {event->GetFloat("x"), event->GetFloat("y"), event->GetFloat("z")};
+	const float missing = std::numeric_limits<float>::quiet_NaN();
+	const vec3 center {event->GetFloat("x", missing), event->GetFloat("y", missing), event->GetFloat("z", missing)};
 	std::lock_guard<std::mutex> lock(transmit_state_mutex_);
 	he_clearance_history_.record(center, std::chrono::steady_clock::now());
 }
@@ -594,7 +594,7 @@ void plugin::print_status() const
 		static_cast<unsigned long long>(stats.cycles));
 	const bool smoke_available = result != nullptr ? result->smoke_available
 		: smoke_gamedata_available_ && smoke_schema_available_;
-	META_CONPRINTF("[CS2FOW] smoke enabled=%d available=%d captured=%u he_events=%d he_clears=%u\n",
+	META_CONPRINTF("[CS2FOW] smoke enabled=%d available=%d captured=%u he_listener=%d he_clears=%u\n",
 		cs2fow_smoke_occlusion.Get() ? 1 : 0, smoke_available ? 1 : 0, result == nullptr ? 0u : result->smoke_count,
 		he_event_available_ ? 1 : 0, result == nullptr ? 0u : result->he_clearance_count);
 	META_CONPRINTF("[CS2FOW] teammate filtering=%d\n", cs2fow_filter_teammates.Get() ? 1 : 0);
