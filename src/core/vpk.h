@@ -22,6 +22,7 @@ struct vpk_entry
 	uint64_t preload_offset {};
 	uint16_t preload_size {};
 	uint64_t embedded_data_offset {};
+	uint64_t embedded_data_size {};
 };
 
 bool list_vpk_entries(const std::filesystem::path &vpk_path, std::vector<vpk_entry> &entries, std::string &error);

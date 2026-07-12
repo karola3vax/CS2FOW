@@ -58,7 +58,7 @@ void write_test_vpk(const std::filesystem::path &path, const char *extension, co
 	append_string(tree, name);
 	append<uint32_t>(tree, crc);
 	append<uint16_t>(tree, 0u);
-	append<uint16_t>(tree, 0x7fffu);
+	append<uint16_t>(tree, 0u);
 	append<uint32_t>(tree, 0u);
 	append<uint32_t>(tree, size);
 	append<uint16_t>(tree, 0xffffu);
@@ -73,7 +73,8 @@ void write_test_vpk(const std::filesystem::path &path, const char *extension, co
 }
 
 void write_extractable_vpk(const std::filesystem::path &path, uint32_t version, uint16_t archive_index,
-	const std::string &preload, const std::string &payload, uint16_t terminator = 0xffffu)
+	const std::string &preload, const std::string &payload, uint16_t terminator = 0xffffu,
+	uint32_t declared_file_data_size = std::numeric_limits<uint32_t>::max(), const std::string &footer = {})
 {
 	std::vector<std::byte> complete;
 	complete.insert(complete.end(), reinterpret_cast<const std::byte *>(preload.data()),
@@ -96,7 +97,8 @@ void write_extractable_vpk(const std::filesystem::path &path, uint32_t version, 
 	append_string(tree, "");
 	append_string(tree, "");
 	std::ofstream stream(path, std::ios::binary);
-	const uint32_t file_data_size = archive_index == 0x7fffu ? static_cast<uint32_t>(payload.size()) : 0u;
+	const uint32_t file_data_size = declared_file_data_size == std::numeric_limits<uint32_t>::max()
+		? (archive_index == 0x7fffu ? static_cast<uint32_t>(payload.size()) : 0u) : declared_file_data_size;
 	if (version == 1)
 	{
 		const uint32_t header[] = {0x55aa1234u, 1u, static_cast<uint32_t>(tree.size())};
@@ -112,6 +114,7 @@ void write_extractable_vpk(const std::filesystem::path &path, uint32_t version, 
 	{
 		stream.write(payload.data(), static_cast<std::streamsize>(payload.size()));
 	}
+	stream.write(footer.data(), static_cast<std::streamsize>(footer.size()));
 	stream.close();
 	if (archive_index != 0x7fffu && !payload.empty())
 	{
@@ -211,6 +214,18 @@ void test_vpk(const std::filesystem::path &directory)
 	const std::filesystem::path extracted = directory / "embedded-out.vpk";
 	assert(extract_vpk_entry(embedded, entry, extracted, error));
 	assert(read_text_file(extracted) == "prepayload");
+
+	const std::filesystem::path v2_zero_data = directory / "v2-zero-data.vpk";
+	write_extractable_vpk(v2_zero_data, 2, 0x7fffu, "", "footer-data", 0xffffu, 0u);
+	assert(!find_vpk_entry(v2_zero_data, "maps/workshop/123/de_nested.vpk", entry, error));
+	const std::filesystem::path v2_short_data = directory / "v2-short-data.vpk";
+	write_extractable_vpk(v2_short_data, 2, 0x7fffu, "", "payload", 0xffffu, 3u);
+	assert(!find_vpk_entry(v2_short_data, "maps/workshop/123/de_nested.vpk", entry, error));
+	const std::filesystem::path v2_footer = directory / "v2-footer.vpk";
+	write_extractable_vpk(v2_footer, 2, 0x7fffu, "", "payload", 0xffffu, 7u, "ignored-footer");
+	assert(find_vpk_entry(v2_footer, "maps/workshop/123/de_nested.vpk", entry, error));
+	assert(extract_vpk_entry(v2_footer, entry, directory / "v2-footer-out.vpk", error));
+	assert(read_text_file(directory / "v2-footer-out.vpk") == "payload");
 
 	const std::filesystem::path preload_only = directory / "preload.vpk";
 	write_extractable_vpk(preload_only, 1, 0x7fffu, "only-preload", "");
@@ -394,6 +409,15 @@ bool scalar_hit(const triangle &value, vec3 origin, vec3 target)
 	return distance > 1.0e-5f && distance < 1.0f - 1.0e-5f;
 }
 
+void sync_test_bvh_header(bvh8_data &data)
+{
+	data.header.node_count = static_cast<uint32_t>(data.nodes.size());
+	data.header.packet_count = static_cast<uint32_t>(data.packets.size());
+	data.header.nodes_offset = sizeof(bvh8_header);
+	data.header.packets_offset = data.header.nodes_offset + data.nodes.size() * sizeof(bvh8_node);
+	data.header.file_size = data.header.packets_offset + data.packets.size() * sizeof(triangle_packet8);
+}
+
 void test_bvh(const std::filesystem::path &directory)
 {
 	std::vector<triangle> triangles;
@@ -422,6 +446,71 @@ void test_bvh(const std::filesystem::path &directory)
 	loaded.header.flags = 0x80000000u;
 	assert(!validate_bvh8(loaded, error));
 	loaded.header.flags = 0;
+
+	bvh8_data invalid_tree = loaded;
+	uint32_t shared_node = k_invalid_ref;
+	for (uint32_t child : invalid_tree.nodes[0].child)
+	{
+		if (child != k_invalid_ref && !is_leaf_ref(child))
+		{
+			if (shared_node == k_invalid_ref) shared_node = child;
+			else
+			{
+				for (uint32_t &candidate : invalid_tree.nodes[0].child)
+				{
+					if (candidate == child)
+					{
+						candidate = shared_node;
+						break;
+					}
+				}
+				break;
+			}
+		}
+	}
+	assert(shared_node != k_invalid_ref && !validate_bvh8(invalid_tree, error));
+	assert(error == "BVH8 node has more than one parent");
+
+	invalid_tree = loaded;
+	uint32_t shared_packet = k_invalid_ref;
+	bool duplicated_packet = false;
+	for (bvh8_node &node : invalid_tree.nodes)
+	{
+		for (uint32_t &child : node.child)
+		{
+			if (!is_leaf_ref(child)) continue;
+			if (shared_packet == k_invalid_ref) shared_packet = child;
+			else
+			{
+				child = shared_packet;
+				duplicated_packet = true;
+				break;
+			}
+		}
+		if (duplicated_packet) break;
+	}
+	assert(duplicated_packet && !validate_bvh8(invalid_tree, error));
+	assert(error == "BVH8 packet has more than one parent");
+
+	invalid_tree = loaded;
+	invalid_tree.nodes.emplace_back();
+	sync_test_bvh_header(invalid_tree);
+	assert(!validate_bvh8(invalid_tree, error));
+	assert(error == "BVH8 contains unreachable nodes or packets");
+	invalid_tree = loaded;
+	invalid_tree.packets.emplace_back();
+	sync_test_bvh_header(invalid_tree);
+	assert(!validate_bvh8(invalid_tree, error));
+	assert(error == "BVH8 contains unreachable nodes or packets");
+	invalid_tree = loaded;
+	invalid_tree.header.max_depth = invalid_tree.header.max_depth < k_max_tree_depth
+		? invalid_tree.header.max_depth + 1u : invalid_tree.header.max_depth - 1u;
+	assert(!validate_bvh8(invalid_tree, error));
+	assert(error == "BVH8 depth is inconsistent");
+	invalid_tree = loaded;
+	++invalid_tree.header.triangle_count;
+	assert(!validate_bvh8(invalid_tree, error));
+	assert(error == "BVH8 triangle count is inconsistent");
 
 	const auto rejected_header = [&](const auto &change)
 	{

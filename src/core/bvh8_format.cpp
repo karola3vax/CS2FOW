@@ -12,6 +12,7 @@
 #include <new>
 #include <stdexcept>
 #include <system_error>
+#include <utility>
 
 #if defined(_WIN32)
 #include <Windows.h>
@@ -222,43 +223,102 @@ bool validate_bvh8(const bvh8_data &data, std::string &error)
 		return false;
 	}
 
-	uint64_t counted_triangles = 0;
-	for (uint32_t node_index = 0; node_index < header.node_count; ++node_index)
+	try
 	{
-		const bvh8_node &node = data.nodes[node_index];
-		for (uint32_t child_index = 0; child_index < 8; ++child_index)
+		std::vector<uint8_t> visited_nodes(header.node_count);
+		std::vector<uint8_t> visited_packets(header.packet_count);
+		std::vector<std::pair<uint32_t, uint32_t>> pending;
+		pending.reserve(header.node_count);
+		pending.emplace_back(0u, 1u);
+		visited_nodes[0] = 1;
+		uint32_t node_count = 0;
+		uint32_t packet_count = 0;
+		uint32_t max_depth = 0;
+		uint64_t triangle_count = 0;
+		while (!pending.empty())
 		{
-			const uint32_t ref = node.child[child_index];
-			if (ref == k_invalid_ref)
+			const auto [node_index, depth] = pending.back();
+			pending.pop_back();
+			++node_count;
+			max_depth = std::max(max_depth, depth);
+			if (depth > k_max_tree_depth)
 			{
-				continue;
-			}
-			const float minimum[3] = {node.min_x[child_index], node.min_y[child_index], node.min_z[child_index]};
-			const float maximum[3] = {node.max_x[child_index], node.max_y[child_index], node.max_z[child_index]};
-			if (!finite_bounds(minimum, maximum))
-			{
-				error = "BVH8 contains invalid child bounds";
+				error = "BVH8 tree is too deep";
 				return false;
 			}
-			if (is_leaf_ref(ref))
+			const bvh8_node &node = data.nodes[node_index];
+			for (uint32_t child_index = 0; child_index < 8; ++child_index)
 			{
-				if (leaf_index(ref) >= header.packet_count)
+				const uint32_t ref = node.child[child_index];
+				if (ref == k_invalid_ref)
 				{
-					error = "BVH8 leaf reference is out of range";
+					continue;
+				}
+				const float minimum[3] = {node.min_x[child_index], node.min_y[child_index], node.min_z[child_index]};
+				const float maximum[3] = {node.max_x[child_index], node.max_y[child_index], node.max_z[child_index]};
+				if (!finite_bounds(minimum, maximum))
+				{
+					error = "BVH8 contains invalid child bounds";
 					return false;
 				}
-				counted_triangles += leaf_count(ref);
-			}
-			else if (ref >= header.node_count || ref <= node_index)
-			{
-				error = "BVH8 node reference is invalid";
-				return false;
+				if (is_leaf_ref(ref))
+				{
+					const uint32_t packet = leaf_index(ref);
+					if (packet >= header.packet_count)
+					{
+						error = "BVH8 leaf reference is out of range";
+						return false;
+					}
+					if (visited_packets[packet] != 0)
+					{
+						error = "BVH8 packet has more than one parent";
+						return false;
+					}
+					visited_packets[packet] = 1;
+					++packet_count;
+					triangle_count += leaf_count(ref);
+				}
+				else
+				{
+					if (ref >= header.node_count || ref <= node_index)
+					{
+						error = "BVH8 node reference is invalid";
+						return false;
+					}
+					if (visited_nodes[ref] != 0)
+					{
+						error = "BVH8 node has more than one parent";
+						return false;
+					}
+					visited_nodes[ref] = 1;
+					pending.emplace_back(ref, depth + 1u);
+				}
 			}
 		}
+		if (node_count != header.node_count || packet_count != header.packet_count)
+		{
+			error = "BVH8 contains unreachable nodes or packets";
+			return false;
+		}
+		if (triangle_count != header.triangle_count)
+		{
+			error = "BVH8 triangle count is inconsistent";
+			return false;
+		}
+		if (max_depth != header.max_depth)
+		{
+			error = "BVH8 depth is inconsistent";
+			return false;
+		}
 	}
-	if (counted_triangles != header.triangle_count)
+	catch (const std::bad_alloc &)
 	{
-		error = "BVH8 triangle count is inconsistent";
+		error = "not enough memory to validate BVH8";
+		return false;
+	}
+	catch (const std::length_error &)
+	{
+		error = "BVH8 validation data is too large";
 		return false;
 	}
 	return true;

@@ -29,6 +29,7 @@ struct arguments
 	std::filesystem::path vrf;
 	std::filesystem::path vpk;
 	std::filesystem::path debug_obj;
+	std::filesystem::path inspect_bvh8;
 	bool low_priority {};
 	bool list_maps {};
 };
@@ -60,6 +61,10 @@ bool parse_arguments(int argc, char **argv, arguments &result)
 		{
 			result.list_maps = true;
 		}
+		else if (option == "--inspect-bvh8" && i + 1 < argc)
+		{
+			result.inspect_bvh8 = argv[++i];
+		}
 		else if ((option == "--game" || option == "--map" || option == "--output" || option == "--vrf" || option == "--vpk" || option == "--debug-obj") && i + 1 < argc)
 		{
 			const std::string value = argv[++i];
@@ -74,6 +79,11 @@ bool parse_arguments(int argc, char **argv, arguments &result)
 		{
 			return false;
 		}
+	}
+	if (!result.inspect_bvh8.empty())
+	{
+		return !result.list_maps && result.game.empty() && result.map.empty() && result.output.empty()
+			&& result.vrf.empty() && result.vpk.empty() && result.debug_obj.empty() && !result.low_priority;
 	}
 	if (result.list_maps)
 	{
@@ -235,8 +245,27 @@ int run(int argc, char **argv)
 	if (!parse_arguments(argc, argv, args))
 	{
 		std::cerr << "usage: cs2fow_baker --game <cs2-root> --map <name> [--vpk <file>] [--low-priority] [--output <file>] [--vrf <path>] [--debug-obj <file>]\n"
-			<< "       cs2fow_baker --list-maps --vpk <file>\n";
+			<< "       cs2fow_baker --list-maps --vpk <file>\n"
+			<< "       cs2fow_baker --inspect-bvh8 <file>\n";
 		return 2;
+	}
+	if (!args.inspect_bvh8.empty())
+	{
+		bvh8_data data;
+		std::string error;
+		if (!load_bvh8(args.inspect_bvh8, data, error))
+		{
+			std::cerr << "cs2fow_baker: " << error << '\n';
+			return 1;
+		}
+		const bvh8_header &header = data.header;
+		std::cout << "{\"map\":\"" << json_escape(header.map_name) << "\",\"source_kind\":\""
+			<< (header.flags == 0 ? "world_physics" : "nested_map_vpk") << "\",\"source_crc32\":\"0x"
+			<< std::hex << std::setw(8) << std::setfill('0') << std::nouppercase << header.source_crc32 << std::dec
+			<< "\",\"source_size\":" << header.source_size << ",\"triangles\":" << header.triangle_count
+			<< ",\"nodes\":" << header.node_count << ",\"packets\":" << header.packet_count
+			<< ",\"max_depth\":" << header.max_depth << "}\n";
+		return 0;
 	}
 	if (args.list_maps)
 	{

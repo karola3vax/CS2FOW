@@ -29,6 +29,7 @@ struct vpk_header_info
 	uint64_t file_size {};
 	uint64_t tree_end {};
 	uint64_t embedded_data_offset {};
+	uint64_t embedded_data_size {};
 };
 
 template <typename type>
@@ -81,6 +82,7 @@ bool read_header(std::ifstream &stream, vpk_header_info &info, std::string &erro
 				return false;
 			}
 		}
+		info.embedded_data_size = section_sizes[0];
 		declared_size = header_size;
 		if (!checked_add(declared_size, tree_size, declared_size))
 		{
@@ -107,6 +109,10 @@ bool read_header(std::ifstream &stream, vpk_header_info &info, std::string &erro
 		return false;
 	}
 	info.embedded_data_offset = info.tree_end;
+	if (version == 1)
+	{
+		info.embedded_data_size = info.file_size - info.tree_end;
+	}
 	return true;
 }
 
@@ -280,12 +286,21 @@ bool list_vpk_entries(const std::filesystem::path &vpk_path, std::vector<vpk_ent
 				entry.archive_size = archive_length;
 				entry.size = static_cast<uint64_t>(entry.preload_size) + archive_length;
 				entry.embedded_data_offset = header.embedded_data_offset;
+				entry.embedded_data_size = header.embedded_data_size;
 				entry.path = (directory.empty() ? name : directory + "/" + name)
 					+ (extension.empty() ? "" : "." + extension);
 				uint64_t preload_end = 0;
 				if (!checked_add(entry.preload_offset, entry.preload_size, preload_end) || preload_end > header.tree_end)
 				{
 					error = "VPK preload data is truncated";
+					return false;
+				}
+				uint64_t embedded_end = 0;
+				if (entry.archive_index == k_embedded_archive
+					&& (!checked_add(entry.archive_offset, entry.archive_size, embedded_end)
+						|| embedded_end > header.embedded_data_size))
+				{
+					error = "VPK embedded entry exceeds the file-data section";
 					return false;
 				}
 				stream.seekg(static_cast<std::streamoff>(preload_end));
@@ -343,6 +358,14 @@ bool extract_vpk_entry(const std::filesystem::path &vpk_path, const vpk_entry &e
 			return false;
 		}
 		const uint64_t archive_base = entry.archive_index == k_embedded_archive ? entry.embedded_data_offset : 0;
+		uint64_t embedded_end = 0;
+		if (entry.archive_index == k_embedded_archive
+			&& (!checked_add(entry.archive_offset, entry.archive_size, embedded_end)
+				|| embedded_end > entry.embedded_data_size))
+		{
+			error = "VPK embedded entry exceeds the file-data section";
+			return false;
+		}
 		if (!checked_add(archive_base, entry.archive_offset, archive_offset)
 			|| !range_fits(archive, archive_offset, entry.archive_size, error))
 		{
