@@ -133,9 +133,9 @@ def build_core_package(platform: str, plugin_name: str, baker_name: str, vrf_dir
 def build_official_maps_package() -> Path:
   manifest = json.loads(RELEASE_MANIFEST.read_text(encoding="utf-8"))
   map_names = manifest.get("official_maps", [])
-  if manifest.get("version") != VERSION or len(map_names) != 10 or len(set(map_names)) != len(map_names):
+  if manifest.get("version") != VERSION or len(map_names) != 23 or len(set(map_names)) != len(map_names):
     raise RuntimeError("release manifest version or official map list is invalid")
-  if any(not name.startswith("de_") or not name.replace("_", "").isascii()
+  if any(not name.startswith(("ar_", "cs_", "de_")) or not name.replace("_", "").isascii()
       or not name.replace("_", "").isalnum() for name in map_names):
     raise RuntimeError("release manifest contains an unsafe official map name")
   maps = [ROOT / "data" / "maps" / f"{name}{suffix}" for name in map_names for suffix in (".bvh8", ".json")]

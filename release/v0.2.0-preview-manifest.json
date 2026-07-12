@@ -7,20 +7,33 @@
   "bvh8_format_version": 3,
   "bake_recipe_version": 1,
   "official_maps": [
+    "ar_baggage",
+    "ar_pool_day",
+    "ar_shoots",
+    "ar_shoots_night",
+    "cs_italy",
+    "cs_office",
+    "cs_shelter",
     "de_ancient",
+    "de_ancient_night",
     "de_anubis",
+    "de_boulder",
     "de_cache",
+    "de_debris",
     "de_dust2",
+    "de_eldorado",
+    "de_fachwerk",
     "de_inferno",
     "de_mirage",
     "de_nuke",
     "de_overpass",
+    "de_poseidon",
     "de_train",
     "de_vertigo"
   ],
   "artifacts": {
     "cs2fow-0.2.0-preview-windows-x86_64.zip": "485e6b35e615123cb273aa98479b427e94e5bfee0edd24837af34d485054d4dd",
     "cs2fow-0.2.0-preview-linux-x86_64.zip": "f49a3a75f0c6883b61057e509d5e20e4b5c4df0b3428557b40f0a959dc9c5fb5",
-    "cs2fow-0.2.0-preview-official-maps.zip": "4fed08fd5ed4102c4dd3e50c6ce1c0de97f5ce3ee42613f3b4e6d2bff3ef73f0"
+    "cs2fow-0.2.0-preview-official-maps.zip": "14df09ee5ea3e3c441bf8f3b42fb0b54b9e273c9078591c2a0e5812385cf2cb2"
   }
 }
