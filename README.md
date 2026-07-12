@@ -39,7 +39,7 @@ A cheat cannot recover an exact live enemy position that the server never sent. 
 
 For a living enemy, CS2FOW treats the pawn, current weapons, wearables, carried hostage prop, and directly linked owner/effect entities as one visual group.
 
-Teammates, self, dead players, spectators, and HLTV remain unfiltered.
+Self, dead players, spectators, and HLTV remain unfiltered. Teammates remain unfiltered by default; an optional setting applies the same visibility gate to living teammates.
 
 ### Can players still wallbang a hidden enemy?
 
@@ -97,7 +97,7 @@ When a living enemy is fully behind solid map geometry, CS2FOW may withhold that
 
 This removes the main live position data used by wallhacks. It does not make every form of cheating impossible: sound, teammate information, last-known positions, and other game clues still exist.
 
-Live smoke also blocks visibility rays. An HE detonation opens a 100-unit viewing channel through an affected smoke for 2.5 seconds by default. Baked walls between the blast and sight line still block that opening, and overlapping smoke clouds are checked separately.
+Live smoke also blocks visibility rays. An HE detonation opens a 100-unit viewing channel through an affected smoke for 2.5 seconds by default, but only when that smoke already existed at detonation time. Baked walls between the blast and sight line still block that opening, and overlapping smoke clouds are checked separately.
 
 HLTV, spectators, dead players, and a player viewing themself are not filtered. Teammates remain unfiltered by default; `cs2fow_filter_teammates 1` applies the same visibility rules to their complete visual groups and may also remove client-side teammate markers and radar information.
 
@@ -133,6 +133,7 @@ addons/metamod/cs2fow.vdf
 cfg/cs2fow.cfg
 tools/cs2fow_baker
 tools/vrf/
+licenses/
 ```
 
 Defaults in `cfg/cs2fow.cfg` are:
@@ -185,7 +186,7 @@ Records show the classname, relationship to the pawn (`direct`, `owner_link`, `e
 Important limits:
 
 - Private offsets are accepted only for the exact Windows or Linux server binary recorded in the bundled gamedata. Unknown builds disable CS2FOW instead of attempting unsafe reads.
-- Visibility uses baked static map geometry. Smokes, doors, breakables, props, particles, projectiles, and other moving blockers are not occluders.
+- Visibility uses baked static map geometry plus CS2's live smoke grid when smoke occlusion is enabled. Doors, breakables, props, particles, projectiles, and other moving blockers are not occluders.
 - Movement prediction targets normal competitive/casual CS2 movement. It ramps from zero between 75 and 100 horizontal units per second, caps speed at 350, and caps each player's offset at 96 units, so surf, KZ, and unusually fast boosts can appear late.
 - Shoulder origins deliberately widen with recipient RTT to reduce high-ping corner pop-in. Larger values reveal enemies farther around corners, including while the recipient is stationary.
 - Sound events, bomb information, teammate information, and other non-entity clues are not filtered.
@@ -204,7 +205,7 @@ chmod +x game/csgo/tools/cs2fow_baker
 chmod +x game/csgo/tools/vrf/linux64/Source2Viewer-CLI
 ```
 
-Automatic-baker and VRF failures include the final 8 KiB of their combined output so the useful error is available without successful-bake console spam.
+Automatic-baker and VRF failures include the final 8 KiB of their combined output so the useful error is available without successful-bake console spam. Cancellation and timeout terminate the complete child process tree on both platforms.
 
 **`cs2fow_status` says the server binary does not match:** install a CS2FOW build with gamedata verified for the current Valve server binary. There is no unsafe override.
 
@@ -223,7 +224,8 @@ Manual baker examples:
 ```text
 cs2fow_baker --game <cs2-root> --map de_dust2 --output de_dust2.bvh8
 cs2fow_baker --list-maps --vpk <outer_dir.vpk>
+cs2fow_baker --inspect-bvh8 <file>
 cs2fow_baker --game <cs2-root> --map workshop/123/de_example --vpk <outer_dir.vpk> --output de_example.bvh8
 ```
 
-Generated map data is derived from Counter-Strike 2 game data and is covered by `DATA_NOTICE`, not the project's MIT code license. See `LICENSE`, `THIRD_PARTY_NOTICES`, and `DATA_NOTICE`.
+Generated map data is derived from Counter-Strike 2 game data and is covered by `DATA_NOTICE`, not the project's MIT code license. Core packages include the exact cgltf, ValveResourceFormat 19.2, native-library, and self-contained .NET notices under `licenses/`. See `LICENSE`, `THIRD_PARTY_NOTICES`, and `DATA_NOTICE`.

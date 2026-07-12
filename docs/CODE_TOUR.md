@@ -68,11 +68,11 @@ It explains the intent of the code. The engine and file-format details are still
 
 1. `src/baker/main.cpp` checks the command arguments and safe map name. `--list-maps --vpk` stops after validated, sorted VPK discovery.
 2. `find_map_source` opens the outer VPK. A direct `maps/<map>/world_physics.vmdl_c` wins. If it is absent, `maps/<map>.vpk` is the fallback.
-3. `src/core/vpk.cpp` checks the VPK header, tree bounds, entry terminators, preload data, embedded/numbered archive ranges, and CRC before trusting extracted bytes.
+3. `src/core/vpk.cpp` checks the VPK header, tree bounds, entry terminators, preload data, embedded/numbered archive ranges, and CRC before trusting extracted bytes. Version 2 embedded entries must stay inside its declared file-data section even when footer bytes follow it.
 4. For a nested map, the C++ baker extracts the nested VPK into a temporary directory. Python and the web service do not understand or patch VPK/BVH details.
 5. ValveResourceFormat exports the chosen `world_physics.vmdl_c` as a physics GLB. `glb_import.cpp` reads geometry groups and keeps the collision surfaces accepted by the bake recipe.
 6. `builder.cpp` packs the accepted triangles into eight-wide packets and builds the BVH8 tree.
-7. `bvh8_format.cpp` writes a version 3 file beside the destination. It reloads and verifies that temporary file, including payload CRC, before atomically replacing the destination. A bad write leaves the previous valid bake in place.
+7. `bvh8_format.cpp` writes a version 3 file beside the destination. It reloads and verifies one rooted tree, unique reachable nodes/packets, depth, triangle totals, and payload CRC before atomically replacing the destination. A bad write leaves the previous valid bake in place.
 8. The baker writes a matching `.json` report with source checksums and geometry counts. `--debug-obj` optionally writes accepted triangles for tools such as MeshLab.
 
 The version 3 header is 256 bytes and records recipe version 1. Loading rejects unknown flags, nonzero reserved bytes, unsafe names, non-finite or reversed bounds, impossible counts, noncanonical offsets, wrong exact file size, and bad CRC before the data can become active.
@@ -102,12 +102,13 @@ The game thread runs `hook_game_frame`. At most once per configured interval (de
 
 `visibility_worker::submit` stores only the newest pending snapshot. Work does not form a backlog. The worker wakes, takes ownership of that copy, and computes a new result.
 
-For each living enemy pair the worker:
+For each eligible living pair the worker:
 
 - makes eight recipient origins: current/predicted eye, RTT-scaled left/right shoulders, predicted shoulders, and current/predicted upward points;
 - makes target samples from padded AABB corners, fifteen tuned body points, and a held-weapon muzzle point;
 - clips movement at baked walls and adds separate current/future boxes, body points, and muzzle points when useful movement remains;
-- casts at most `8 x 48 = 384` rays, stopping at the first open ray;
+- casts at most `8 x 48 = 384` rays, testing baked walls first and then copied live smoke, and stopping at the first open ray;
+- lets an HE clear only smoke that already existed when the detonation was recorded on the same game clock;
 - first tries the triangle packet that blocked the same pair's earlier ray, then traverses the BVH8 if needed; and
 - holds a newly open pair visible for `cs2fow_visibility_hold_ms`.
 
@@ -121,7 +122,7 @@ The finished immutable result contains its sequence, capture/completion times, r
 2. Lock `transmit_state_mutex_`. This protects lifecycle, pair-baseline, quarantined-group, and debug state shared with game-frame capture and console commands. Ray traversal and file work never run under this lock.
 3. First scan the recipients for CS2 full updates. For those recipients, clear stored hidden groups, but do not alter that full-update snapshot.
 4. Re-read live recipient/target lifecycles and visual groups. Any mismatch with the copied worker player fails open.
-5. Skip self, teammates, invalid players, and full-update snapshots.
+5. Skip self, invalid players, and full-update snapshots. Skip teammates only when optional teammate filtering is disabled.
 6. Require a stable player pair, a warmup period, and evidence that a complete current visual group was previously sent on an older worker sequence before the pair is allowed to hide.
 7. When hidden, store the exact visual group. For each member whose primary bit is set, set the matching bit through the existing second `CCheckTransmitInfo` pointer, locally treated as `dont_transmit`, and only then clear the primary bit.
 8. If either paired-list pointer is unavailable, change neither list and fail open. If a primary bit is already clear, leave both bits alone.
@@ -155,7 +156,7 @@ The BVH8 data is loaded before the worker starts and remains unchanged until tha
 - Enabling/disabling filtering resets lifecycle, pair, hidden-group, and auxiliary-entity state but preserves collected debug evidence.
 - A map change, level shutdown, or normal plugin-state reset also clears debug evidence.
 - Worker start resets pending/published work, cached blocking packets, reveal holds, and timing/pair statistics.
-- Automatic-baker stop cancels/joins its task before old map state is discarded.
+- Automatic-baker stop cancels/joins its task and terminates its full baker/VRF process tree before old map state is discarded.
 
 ## Where to make common changes
 
@@ -195,6 +196,7 @@ python -c "from ambuild2.run import cli_run; cli_run()"
 Set-Location ..
 .\build\cs2fow_tests\windows-x86_64\cs2fow_tests.exe
 python tools\visibility_point_editor\check_points.py
+python -m unittest -v tests\test_package.py
 node --check tools\visibility_point_editor\viewer.js
 python package.py windows-x86_64
 ```
@@ -211,7 +213,7 @@ For an official-map bundle, place each matching `.bvh8` and `.json` report under
 python package.py official-maps
 ```
 
-`package.py` takes the version from top-level `VERSION`. It checks required paths, duplicate/unsafe ZIP entries, ZIP integrity, map/report pairing, Linux executable modes, and writes `packages/SHA256SUMS.txt`.
+`package.py` takes the version from top-level `VERSION`. For every official map it asks `cs2fow_baker --inspect-bvh8` to fully validate the bake, then requires the JSON report's map, source, and geometry metadata to match. It also checks required license files, duplicate/unsafe ZIP entries, ZIP integrity, Linux executable modes, and retains checksums for every current-version archive already built. A full three-target run refuses incomplete final output.
 
 Before preparing a release:
 

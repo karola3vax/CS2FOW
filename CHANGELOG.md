@@ -5,6 +5,7 @@
 - Added default-on smoke occlusion from CS2's live voxel grid, with copied worker data and smoke-only fail-open behavior.
 - Added wall-safe, configurable 2.5-second visibility channels through smoke disturbed by HE grenades.
 - Fixed HE event discovery, post-initialization listener registration, and detonation-position reading without making ordinary smoke depend on HE support.
+- Prevented an old HE event from clearing a smoke that detonated later by ordering both on CS2 game time.
 - Matched visible smoke timing more closely by delaying initial occlusion and revealing fading smoke 0.5 seconds earlier.
 - Added optional teammate visibility filtering with the same wall, smoke, prediction, and full-group rules used for enemies.
 - Reorganized the runtime into map/game-state, worker, transmit, and automatic-baker responsibilities without intentionally changing proven visibility behavior.
@@ -19,7 +20,12 @@
 - Bound private gamedata to verified Windows and Linux server binaries and rejected unsafe player numbers before ray casting.
 - Added snapshot-capture and CheckTransmit timings, full networked-edict linked-visual coverage, and accurate active-HE status wording.
 - Captured bounded VRF and automatic-baker error output so failures include their useful final messages.
-- Added validated BVH8 version 3 files with streaming CRC checks and verified atomic replacement; older bakes are rejected.
+- Made Linux bake cancellation and timeout terminate and reap the complete baker/VRF process tree.
+- Added validated BVH8 version 3 files with rooted-tree, reachability, depth, triangle, and streaming CRC checks plus verified atomic replacement; older or structurally invalid bakes are rejected.
+- Restricted VPK version 2 embedded entries to the declared file-data section instead of accepting undeclared footer bytes.
+- Added a machine-readable `--inspect-bvh8` command and require every official-map bake/report pair to match before packaging.
+- Kept checksums from sequential platform packaging, required all three final archives, and bundled exact cgltf, ValveResourceFormat, native-library, and .NET redistribution notices.
+- Prevented the LOS editor from exporting blank/duplicate names, invalid coordinates, or zero points.
 - Moved all Workshop VPK discovery and extraction into the C++ baker, including the public `--list-maps` command.
 - Added held-weapon muzzle sampling alongside body and axis-aligned bounding box target points.
 - Split and expanded map/BVH and visibility/transmit tests, package verification, and the line-of-sight point editor checks.

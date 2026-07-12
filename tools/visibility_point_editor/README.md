@@ -46,8 +46,11 @@ The editor exports only the ordered body-point preset:
 	"version": 1,
 	"coordinate_space": "source_local",
 	"model": "ctm_sas",
-	"points": []
+	"point_count": 1,
+	"points": [{"name": "head", "x": 0, "y": 0, "z": 64}]
 }
 ```
+
+Copy and download reject blank or duplicate names, non-finite coordinates, and presets outside the 1-32 point limit. The final point cannot be deleted.
 
 Runtime integration is intentionally separate. CS2FOW combines these body points with generated axis-aligned bounding box corners and a muzzle sample in `visibility_sampling.cpp`; `check_points.py` verifies that the body-point order still matches.

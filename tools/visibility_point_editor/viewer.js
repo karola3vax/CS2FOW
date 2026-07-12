@@ -38,6 +38,7 @@ const read_number = (id) =>
 	return Number.isFinite(value) ? value : 0;
 };
 const clone_point = (point) => ({name: point.name, x: Number(point.x), y: Number(point.y), z: Number(point.z)});
+const can_delete_point = (count) => count > 1;
 
 function unique_point_name(base)
 {
@@ -293,7 +294,7 @@ function render_selected_point()
 	}
 	$("add-point").disabled = points.length >= 32;
 	$("duplicate-point").disabled = !point || points.length >= 32;
-	$("delete-point").disabled = !point;
+	$("delete-point").disabled = !can_delete_point(points.length);
 	$("point-count").textContent = `${points.length} point${points.length === 1 ? "" : "s"}`;
 	$("point-name").value = point?.name ?? "";
 	$("point-x").value = point ? format_number(point.x) : "";
@@ -335,12 +336,19 @@ function select_point(index)
 
 function export_json()
 {
-	return JSON.stringify({
+	const export_points = validated_points({
 		version: 1,
 		coordinate_space: "source_local",
 		model: "ctm_sas",
 		point_count: points.length,
-		points: points.map(clone_point)
+		points
+	}, "current preset");
+	return JSON.stringify({
+		version: 1,
+		coordinate_space: "source_local",
+		model: "ctm_sas",
+		point_count: export_points.length,
+		points: export_points
 	}, null, "\t") + "\n";
 }
 
@@ -649,8 +657,10 @@ function install_ui()
 	});
 	$("delete-point").addEventListener("click", () =>
 	{
-		if (!points.length)
+		if (!can_delete_point(points.length))
 		{
+			status_extra = "At least one LOS point is required.";
+			update_status();
 			return;
 		}
 		points.splice(selected_index, 1);
@@ -698,14 +708,23 @@ function install_ui()
 	});
 	$("download-json").addEventListener("click", () =>
 	{
-		const blob = new Blob([export_json()], {type: "application/json"});
-		const url = URL.createObjectURL(blob);
-		const anchor = document.createElement("a");
-		anchor.href = url;
-		anchor.download = "los_points_sas.json";
-		anchor.click();
-		URL.revokeObjectURL(url);
+		try
+		{
+			const blob = new Blob([export_json()], {type: "application/json"});
+			const url = URL.createObjectURL(blob);
+			const anchor = document.createElement("a");
+			anchor.href = url;
+			anchor.download = "los_points_sas.json";
+			anchor.click();
+			URL.revokeObjectURL(url);
+			status_extra = "Downloaded LOS JSON.";
+		}
+		catch (error)
+		{
+			status_extra = `Download failed: ${error.message || error}`;
+		}
 		set_export_menu(false);
+		update_status();
 	});
 	$("import-json").addEventListener("change", async (event) =>
 	{
@@ -760,11 +779,31 @@ function run_self_checks()
 	expect(default_points.length === 15, "default body point count");
 	expect(generated_aabb_points().length === 8, "AABB fallback count");
 	const roundtrip = JSON.parse(export_json());
+	const imported = validated_points(roundtrip, "self-check round trip");
 	expect(roundtrip.points.length === points.length, "JSON round trip count");
 	expect(roundtrip.point_count === points.length, "JSON point count metadata");
 	expect(roundtrip.version === 1 && roundtrip.model === "ctm_sas", "JSON metadata");
 	expect(roundtrip.coordinate_space === "source_local", "JSON coordinate space");
 	expect(roundtrip.points.every((point, index) => point.name === points[index].name), "JSON point order");
+	expect(imported.every((point, index) => point.name === points[index].name), "validated import round trip");
+	expect(!can_delete_point(1) && can_delete_point(2), "final point protection");
+	for (const invalid of [
+		{...roundtrip, point_count: 0, points: []},
+		{...roundtrip, points: roundtrip.points.map((point, index) => ({...point, name: index === 0 ? " " : point.name}))},
+		{...roundtrip, points: roundtrip.points.map((point, index) => ({...point, name: index === 1 ? roundtrip.points[0].name : point.name}))},
+		{...roundtrip, points: roundtrip.points.map((point, index) => ({...point, x: index === 0 ? Infinity : point.x}))}
+	])
+	{
+		let rejected = false;
+		try { validated_points(invalid, "self-check"); } catch { rejected = true; }
+		expect(rejected, "invalid export rejection");
+	}
+	const previous_status = status_extra;
+	status_extra = "Export failed: self-check";
+	update_status();
+	expect($("status").textContent === status_extra, "visible export validation feedback");
+	status_extra = previous_status;
+	update_status();
 	expect($("points-list").querySelectorAll('[role="option"]').length === 15, "point list count");
 	expect($("point-name").value === points[selected_index]?.name, "selected point synchronization");
 	for (const id of ["load-sas", "import-los", "export-toggle", "points-list", "point-name", "scene-card", "points-card"])

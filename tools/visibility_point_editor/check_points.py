@@ -22,6 +22,7 @@ def main() -> None:
     assert preset.get("coordinate_space") == "source_local"
     assert preset.get("model") == "ctm_sas"
     assert preset["point_count"] == len(points) == 15
+    assert all(isinstance(point.get("name"), str) and point["name"].strip() for point in points)
     assert len({point["name"] for point in points}) == len(points)
     assert all(math.isfinite(float(point[axis])) for point in points for axis in ("x", "y", "z"))
 
