@@ -533,6 +533,24 @@ void plugin::start_automatic_bake(const std::string &map, const map_source &sour
 		disable("automatic baker or VRF is missing");
 		return;
 	}
+#if !defined(_WIN32)
+	const auto check_executable = [&](const std::filesystem::path &path)
+	{
+		std::error_code ec;
+		const auto status = std::filesystem::status(path, ec);
+		return !ec && (status.permissions() & (std::filesystem::perms::owner_exec | std::filesystem::perms::group_exec | std::filesystem::perms::others_exec)) != std::filesystem::perms::none;
+	};
+	if (!check_executable(baker))
+	{
+		disable("baker missing execute permission (chmod +x " + baker.string() + ")");
+		return;
+	}
+	if (!check_executable(vrf))
+	{
+		disable("VRF missing execute permission (chmod +x " + vrf.string() + ")");
+		return;
+	}
+#endif
 	disabled_reason_ = "automatic bake in progress";
 	META_CONPRINTF("[CS2FOW] %s for %s; starting automatic bake\n", reason.c_str(), map.c_str());
 	automatic_baker_.start({map, source, base.parent_path().parent_path(), output, baker, vrf});

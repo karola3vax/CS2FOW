@@ -284,7 +284,14 @@ bool run_process(const std::filesystem::path &executable, const std::vector<std:
 	if (spawn_error != 0)
 	{
 		close(output_pipe[0]);
-		error = std::string("could not start process: ") + std::strerror(spawn_error);
+		if (spawn_error == EACCES)
+		{
+			error = "could not start process: missing execute permission or host blocking executables (EACCES)";
+		}
+		else
+		{
+			error = std::string("could not start process: ") + std::strerror(spawn_error);
+		}
 		return false;
 	}
 	const auto drain_output = [&]

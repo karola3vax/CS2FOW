@@ -926,6 +926,88 @@ double benchmark_worker_loop(const bvh8_data &data, const std::string &label)
 
 } // namespace
 
+void test_aim_map_respawn()
+{
+	using clock = std::chrono::steady_clock;
+	const auto warmup = std::chrono::milliseconds(1500);
+	const auto quarantine = std::chrono::milliseconds(3000);
+	auto now = clock::time_point {} + std::chrono::seconds(20);
+
+	lifecycle_key recipient;
+	recipient.has_controller = true;
+	recipient.pawn_entity = 10;
+	recipient.team = 2;
+	recipient.alive = true;
+
+	lifecycle_key target;
+	target.has_controller = true;
+	target.pawn_entity = 20;
+	target.team = 3;
+	target.alive = true;
+
+	pair_guard guard;
+	hidden_entity_group<uint32_t, 3> hidden_groups_;
+	std::array<bool, 64> entity_bits {};
+
+	uint32_t stale_entity = 0;
+
+	for (int cycle = 1; cycle <= 500; ++cycle)
+	{
+		now += std::chrono::milliseconds(16);
+
+		if (hidden_groups_.count != 0 && now >= hidden_groups_.quarantine_until)
+		{
+			hidden_group_clear(hidden_groups_);
+		}
+
+		if (cycle > 0 && cycle % 50 == 0)
+		{
+			stale_entity = target.pawn_entity;
+			entity_bits[stale_entity] = false;
+			target.pawn_entity++;
+			target.alive = true;
+		}
+
+		update_pair_guard(guard, recipient, true, target, true, now, warmup);
+
+		hidden_entity_group<uint32_t, 3> current_group;
+		current_group.source = target.pawn_entity;
+		current_group.handles[0] = target.pawn_entity;
+		current_group.count = 1;
+
+		entity_bits[target.pawn_entity] = true;
+
+		bool group_fully_marked = hidden_group_all_of(current_group, [&](uint32_t handle) { return entity_bits[handle]; });
+		if (stale_entity != 0)
+		{
+			assert(!hidden_group_all_of(current_group, [&](uint32_t handle) { return handle == stale_entity; }));
+		}
+
+		update_pair_visual_group(guard, test_visual_key({target.pawn_entity}), now, warmup);
+
+		if (!pair_allows_hiding(guard, now, cycle))
+		{
+			if (group_fully_marked)
+			{
+				pair_note_open(guard, now, cycle);
+				hidden_group_clear(hidden_groups_);
+			}
+		}
+		else
+		{
+			hidden_group_store(hidden_groups_, current_group, now, quarantine);
+		}
+
+		if (stale_entity != 0 && hidden_groups_.count > 0)
+		{
+			for (size_t i = 0; i < hidden_groups_.count; ++i)
+			{
+				assert(hidden_groups_.handles[i] != stale_entity);
+			}
+		}
+	}
+}
+
 void run_visibility_and_transmit_tests()
 {
 	test_visibility_pair_eligibility();
@@ -938,6 +1020,7 @@ void run_visibility_and_transmit_tests()
 	test_checktransmit_private_offsets();
 	test_transmit_debug();
 	test_hidden_entity_group();
+	test_aim_map_respawn();
 }
 
 double run_worker_benchmark(const cs2fow::bvh8_data &data, const std::string &label)
