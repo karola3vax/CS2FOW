@@ -5,6 +5,7 @@
 // CS2 objects. New pending work replaces old pending work instead of queuing.
 
 #include "bvh8.h"
+#include "ics2fow_visibility.h"
 #include "smoke_occlusion.h"
 #include "visibility_sampling.h"
 
@@ -22,6 +23,7 @@ namespace cs2fow
 {
 
 inline constexpr uint32_t k_max_players = 64;
+static_assert(k_max_players == k_visibility_max_players_v1);
 
 struct player_state
 {
@@ -36,6 +38,8 @@ struct player_state
 	float rtt_seconds {};
 	weapon_muzzle_class muzzle_class {weapon_muzzle_class::none};
 	int pawn_entity {-1};
+	uint32_t pawn_handle {};
+	uint32_t pawn_generation {};
 };
 
 inline bool valid_player_numbers(const player_state &player)
@@ -59,6 +63,10 @@ struct visibility_snapshot
 {
 	uint64_t sequence {};
 	std::chrono::steady_clock::time_point captured;
+	int32_t server_tick {-1};
+	float server_time {};
+	VisibilityMapIdentityV1 map {};
+	VisibilitySettingsV1 settings {};
 	bool filter_teammates {};
 	bool smoke_enabled {};
 	bool smoke_available {};
@@ -71,6 +79,10 @@ struct visibility_result
 	uint64_t sequence {};
 	std::chrono::steady_clock::time_point captured;
 	std::chrono::steady_clock::time_point completed;
+	int32_t server_tick {-1};
+	float server_time {};
+	VisibilityMapIdentityV1 map {};
+	VisibilitySettingsV1 settings {};
 	player_state players[k_max_players];
 	float recipient_lookahead_seconds[k_max_players] {};
 	bool filter_teammates {};
@@ -78,6 +90,8 @@ struct visibility_result
 	bool smoke_available {};
 	uint32_t smoke_count {};
 	uint32_t he_clearance_count {};
+	bool evaluated[k_max_players][k_max_players] {};
+	bool sample_clear[k_max_players][k_max_players] {};
 	bool visible[k_max_players][k_max_players] {};
 	double worker_ms {};
 	uint32_t evaluated_pairs {};
@@ -95,6 +109,9 @@ inline bool visibility_snapshot_fresh(std::chrono::steady_clock::time_point capt
 	}
 	return lookahead_seconds <= 0.0f || age < std::chrono::duration<float>(lookahead_seconds);
 }
+
+VisibilityStatus copy_visibility_snapshot_v1(const visibility_result *result, ProviderStateV1 provider_state,
+	std::chrono::steady_clock::time_point now, SnapshotV1 *output, uint32_t output_size) noexcept;
 
 struct worker_stats
 {

@@ -449,8 +449,29 @@ void test_visibility_worker()
 	});
 	visibility_snapshot value;
 	value.sequence = 1;
+	value.captured = std::chrono::steady_clock::now();
+	value.server_tick = 1234;
+	value.server_time = 19.25f;
+	std::memcpy(value.map.map_name, "de_test", 8);
+	value.map.source_size = 42;
+	value.map.source_crc32 = 0x12345678u;
+	value.map.payload_crc32 = 0x87654321u;
+	value.map.bvh8_version = 3;
+	value.map.bake_recipe_version = 1;
+	value.settings.update_interval_ms = 1;
+	value.settings.he_clear_radius_units = 100.0f;
+	value.settings.he_clear_seconds = 2.5f;
+	value.filter_teammates = true;
+	value.smoke_enabled = true;
+	value.smoke_available = true;
 	value.players[0] = {true, 2, {0, 0, 64}, {0, 0, 0}, {}, {-16, -16, 0}, {16, 16, 72}};
 	value.players[1] = {true, 3, {64, 0, 64}, {64, 0, 0}, {}, {-16, -16, 0}, {16, 16, 72}};
+	value.players[0].pawn_entity = 10;
+	value.players[0].pawn_handle = 0x100au;
+	value.players[1].pawn_entity = 11;
+	value.players[1].pawn_handle = 0x100bu;
+	value.players[0].pawn_generation = 7;
+	value.players[1].pawn_generation = 8;
 
 	auto worker = std::make_unique<visibility_worker>();
 	worker->start(&wall);
@@ -467,21 +488,68 @@ void test_visibility_worker()
 	};
 	worker->submit(value, 16, {75, 1.5f, 375, 96.0f, 24.0f, 0.64f, 128.0f});
 	auto result = wait_for(1);
-	assert(result && !result->visible[0][1]);
+	assert(result && result->evaluated[0][1] && !result->sample_clear[0][1] && !result->visible[0][1]);
 
 	value.sequence = 2;
 	value.players[1].eye.x = 16;
 	value.players[1].origin.x = 16;
 	worker->submit(value, 16, {75, 1.5f, 375, 96.0f, 24.0f, 0.64f, 128.0f});
 	result = wait_for(2);
-	assert(result && result->visible[0][1]);
+	assert(result && result->evaluated[0][1] && result->sample_clear[0][1] && result->visible[0][1]);
 
 	value.sequence = 3;
 	value.players[1].eye.x = 64;
 	value.players[1].origin.x = 64;
 	worker->submit(value, 16, {75, 1.5f, 375, 96.0f, 24.0f, 0.64f, 128.0f});
 	result = wait_for(3);
-	assert(result && result->visible[0][1]);
+	assert(result && result->evaluated[0][1] && !result->sample_clear[0][1] && result->visible[0][1]);
+	SnapshotV1 abi;
+	const std::uint32_t abi_size = static_cast<std::uint32_t>(sizeof(abi));
+	assert(copy_visibility_snapshot_v1(result.get(), ProviderStateV1::ready,
+		result->captured + std::chrono::milliseconds(10),
+		&abi, abi_size) == VisibilityStatus::ok);
+	assert(abi.struct_size == abi_size && abi.abi_version == 1 && abi.semantics_version == 3
+		&& abi.provider_state == ProviderStateV1::ready);
+	assert(abi.sequence == 3 && abi.server_tick == 1234 && std::fabs(abi.server_time - 19.25f) < 0.001f);
+	assert(abi.captured_monotonic_ns != 0 && abi.completed_monotonic_ns >= abi.captured_monotonic_ns);
+	assert(std::strcmp(abi.map.map_name, "de_test") == 0 && abi.map.source_size == 42
+		&& abi.map.source_crc32 == 0x12345678u && abi.map.payload_crc32 == 0x87654321u
+		&& abi.map.bvh8_version == 3 && abi.map.bake_recipe_version == 1);
+	assert(abi.settings.update_interval_ms == 1 && abi.settings.visibility_hold_ms == 16
+		&& abi.settings.max_lookahead_ms == 375 && abi.settings.he_clear_radius_units == 100.0f);
+	assert(abi.snapshot_flags == (SNAPSHOT_FILTER_TEAMMATES | SNAPSHOT_SMOKE_ENABLED | SNAPSHOT_SMOKE_AVAILABLE));
+	assert((abi.valid_slots & 3u) == 3u && abi.identities[0].pawn_entity == 10
+		&& abi.identities[0].pawn_handle == 0x100au && abi.identities[0].pawn_generation == 7
+		&& abi.recipient_lookahead_ms[0] == 75);
+	assert((abi.pair_flags[0][1] & PAIR_EVALUATED) != 0);
+	assert((abi.pair_flags[0][1] & PAIR_SAMPLE_CLEAR) == 0);
+	assert((abi.pair_flags[0][1] & PAIR_PLAUSIBLE_VISIBLE) != 0);
+	assert(copy_visibility_snapshot_v1(result.get(), ProviderStateV1::ready,
+		result->captured + std::chrono::milliseconds(80),
+		&abi, abi_size) == VisibilityStatus::ok && abi.pair_flags[0][1] == 0);
+	abi.struct_size = 77;
+	assert(copy_visibility_snapshot_v1(result.get(), ProviderStateV1::ready,
+		result->captured, &abi, abi_size - 1u)
+		== VisibilityStatus::bad_size && abi.struct_size == 77);
+	assert(copy_visibility_snapshot_v1(nullptr, ProviderStateV1::baking,
+		result->captured, &abi, abi_size) == VisibilityStatus::unavailable);
+	assert(abi.struct_size == abi_size && abi.abi_version == 1 && abi.semantics_version == 3
+		&& abi.provider_state == ProviderStateV1::baking && abi.sequence == 0
+		&& abi.valid_slots == 0 && abi.pair_flags[0][1] == 0);
+	assert(copy_visibility_snapshot_v1(result.get(), ProviderStateV1::disabled,
+		result->captured, &abi, abi_size) == VisibilityStatus::unavailable);
+	assert(abi.provider_state == ProviderStateV1::disabled && abi.sequence == 0
+		&& abi.pair_flags[0][1] == 0);
+	assert(copy_visibility_snapshot_v1(nullptr, ProviderStateV1::unavailable,
+		result->captured, &abi, abi_size) == VisibilityStatus::unavailable);
+	assert(abi.provider_state == ProviderStateV1::unavailable && abi.sequence == 0
+		&& abi.pair_flags[0][1] == 0);
+	abi.struct_size = 77;
+	assert(copy_visibility_snapshot_v1(result.get(), ProviderStateV1::ready,
+		result->captured + std::chrono::milliseconds(101), &abi, abi_size) == VisibilityStatus::stale);
+	assert(abi.struct_size == abi_size && abi.abi_version == 1 && abi.semantics_version == 3
+		&& abi.provider_state == ProviderStateV1::ready && abi.sequence == 0
+		&& abi.valid_slots == 0 && abi.pair_flags[0][1] == 0);
 
 	std::this_thread::sleep_for(std::chrono::milliseconds(20));
 	value.sequence = 4;
@@ -493,7 +561,8 @@ void test_visibility_worker()
 	value.filter_teammates = false;
 	worker->submit(value, 16, {75, 1.5f, 375, 96.0f, 24.0f, 0.64f, 128.0f});
 	result = wait_for(5);
-	assert(result && result->visible[0][1] && result->evaluated_pairs == 0 && !result->filter_teammates);
+	assert(result && !result->evaluated[0][1] && result->visible[0][1]
+		&& result->evaluated_pairs == 0 && !result->filter_teammates);
 	value.sequence = 6;
 	value.filter_teammates = true;
 	worker->submit(value, 16, {75, 1.5f, 375, 96.0f, 24.0f, 0.64f, 128.0f});

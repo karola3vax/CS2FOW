@@ -5,9 +5,32 @@
 // No function in this file dereferences a live engine object.
 
 #include <algorithm>
+#include <cmath>
+#include <limits>
 
 namespace cs2fow
 {
+namespace
+{
+
+uint64_t monotonic_nanoseconds(std::chrono::steady_clock::time_point value)
+{
+	const auto count = std::chrono::duration_cast<std::chrono::nanoseconds>(value.time_since_epoch()).count();
+	return count > 0 ? static_cast<uint64_t>(count) : 0;
+}
+
+uint16_t lookahead_milliseconds(float seconds)
+{
+	if (!std::isfinite(seconds) || seconds <= 0.0f)
+	{
+		return 0;
+	}
+	const float milliseconds = std::min(seconds * 1000.0f,
+		static_cast<float>(std::numeric_limits<uint16_t>::max()));
+	return static_cast<uint16_t>(std::lround(milliseconds));
+}
+
+} // namespace
 
 visibility_worker::~visibility_worker()
 {
@@ -57,6 +80,14 @@ void visibility_worker::submit(visibility_snapshot value, uint32_t hold_ms, visi
 {
 	{
 		std::lock_guard lock(mutex_);
+		value.settings.visibility_hold_ms = hold_ms;
+		value.settings.base_lookahead_ms = tuning.base_lookahead_ms;
+		value.settings.max_lookahead_ms = tuning.max_lookahead_ms;
+		value.settings.rtt_lookahead_scale = tuning.rtt_lookahead_scale;
+		value.settings.max_prediction_units = tuning.max_prediction_units;
+		value.settings.shoulder_base_units = tuning.shoulder_base_units;
+		value.settings.shoulder_rtt_scale = tuning.shoulder_rtt_scale;
+		value.settings.max_shoulder_units = tuning.max_shoulder_units;
 		pending_ = std::move(value);
 		hold_ms_ = hold_ms;
 		tuning_ = tuning;
@@ -78,6 +109,73 @@ worker_stats visibility_worker::stats() const
 visibility_player visibility_worker::sample_player(const player_state &player)
 {
 	return {player.eye, player.origin, player.velocity, player.mins, player.maxs, player.eye_yaw_degrees, player.rtt_seconds, player.muzzle_class};
+}
+
+VisibilityStatus copy_visibility_snapshot_v1(const visibility_result *result, ProviderStateV1 provider_state,
+	std::chrono::steady_clock::time_point now, SnapshotV1 *output, uint32_t output_size) noexcept
+{
+	if (output == nullptr || output_size != static_cast<std::uint32_t>(sizeof(SnapshotV1)))
+	{
+		return VisibilityStatus::bad_size;
+	}
+	*output = {};
+	output->struct_size = static_cast<std::uint32_t>(sizeof(SnapshotV1));
+	output->abi_version = k_visibility_abi_version;
+	output->semantics_version = k_visibility_semantics_version;
+	output->provider_state = provider_state;
+	if (provider_state != ProviderStateV1::ready || result == nullptr)
+	{
+		return VisibilityStatus::unavailable;
+	}
+	if (now < result->captured || !visibility_snapshot_fresh(result->captured, now, 0.0f))
+	{
+		return VisibilityStatus::stale;
+	}
+
+	output->sequence = result->sequence;
+	output->captured_monotonic_ns = monotonic_nanoseconds(result->captured);
+	output->completed_monotonic_ns = monotonic_nanoseconds(result->completed);
+	output->server_tick = result->server_tick;
+	output->server_time = result->server_time;
+	output->map = result->map;
+	output->settings = result->settings;
+	output->smoke_count = result->smoke_count;
+	output->he_clearance_count = result->he_clearance_count;
+	if (result->filter_teammates) output->snapshot_flags |= SNAPSHOT_FILTER_TEAMMATES;
+	if (result->smoke_enabled) output->snapshot_flags |= SNAPSHOT_SMOKE_ENABLED;
+	if (result->smoke_available) output->snapshot_flags |= SNAPSHOT_SMOKE_AVAILABLE;
+
+	for (uint32_t slot = 0; slot < k_max_players; ++slot)
+	{
+		VisibilityIdentityV1 &identity = output->identities[slot];
+		identity.pawn_entity = -1;
+		const player_state &player = result->players[slot];
+		if (player.valid)
+		{
+			output->valid_slots |= uint64_t {1} << slot;
+			identity.pawn_entity = static_cast<int32_t>(player.pawn_entity);
+			identity.pawn_handle = player.pawn_handle;
+			identity.pawn_generation = player.pawn_generation;
+			identity.team = player.team;
+		}
+		output->recipient_lookahead_ms[slot] = lookahead_milliseconds(result->recipient_lookahead_seconds[slot]);
+		if (!visibility_snapshot_fresh(result->captured, now, result->recipient_lookahead_seconds[slot]))
+		{
+			continue;
+		}
+		for (uint32_t target = 0; target < k_max_players; ++target)
+		{
+			if (!result->evaluated[slot][target])
+			{
+				continue;
+			}
+			uint8_t flags = PAIR_EVALUATED;
+			if (result->sample_clear[slot][target]) flags |= PAIR_SAMPLE_CLEAR;
+			if (result->visible[slot][target]) flags |= PAIR_PLAUSIBLE_VISIBLE;
+			output->pair_flags[slot][target] = flags;
+		}
+	}
+	return VisibilityStatus::ok;
 }
 
 void visibility_worker::run()
@@ -104,6 +202,10 @@ void visibility_worker::run()
 		auto result = std::make_shared<visibility_result>();
 		result->sequence = current.sequence;
 		result->captured = current.captured;
+		result->server_tick = current.server_tick;
+		result->server_time = current.server_time;
+		result->map = current.map;
+		result->settings = current.settings;
 		result->filter_teammates = current.filter_teammates;
 		result->smoke_enabled = current.smoke_enabled;
 		result->smoke_available = current.smoke_available;
@@ -135,6 +237,7 @@ void visibility_worker::run()
 				{
 					continue;
 				}
+				result->evaluated[recipient][target] = true;
 				++result->evaluated_pairs;
 				bool blocked = true;
 				const auto &ray_origins = recipient_origins[recipient];
@@ -159,6 +262,7 @@ void visibility_worker::run()
 					}
 				}
 				const auto now = std::chrono::steady_clock::now();
+				result->sample_clear[recipient][target] = !blocked;
 				if (!blocked)
 				{
 					revealed_until_[recipient][target] = now + std::chrono::milliseconds(hold_ms);

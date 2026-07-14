@@ -159,11 +159,13 @@ void copy_entity_name(CEntityInstance *entity, char (&name)[k_max_entity_name]);
 bool valid_networked_edict_index(int index);
 int resolve_entity_index(CGameEntitySystem *system, CEntityHandle handle);
 
-class plugin final : public ISmmPlugin, public IMetamodListener, public IGameEventListener2
+class plugin final : public ISmmPlugin, public IMetamodListener, public IGameEventListener2, public ICS2FOWVisibility
 {
 public:
 	bool Load(PluginId id, ISmmAPI *api, char *error, size_t max_length, bool late) override;
 	bool Unload(char *error, size_t max_length) override;
+	void *OnMetamodQuery(const char *iface, int *ret) override;
+	VisibilityStatus CopyLatest(SnapshotV1 *output, uint32_t output_size) const noexcept override;
 	void AllPluginsLoaded() override {}
 	void OnLevelInit(char const *map_name, char const *, char const *, char const *, bool, bool) override;
 	void OnLevelShutdown() override;
@@ -238,6 +240,7 @@ private:
 	int game_event_load_hook_id_ {};
 	std::string map_;
 	std::string disabled_reason_ {"no map loaded"};
+	ProviderStateV1 provider_state_ {ProviderStateV1::unavailable};
 	map_source source_;
 	bvh8_data data_;
 	visibility_worker worker_;

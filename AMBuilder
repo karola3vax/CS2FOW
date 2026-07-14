@@ -10,6 +10,7 @@ with open(os.path.join(root, 'VERSION'), encoding='utf-8') as version_file:
 
 def configure(compiler, plugin=False):
   compiler.cxxincludes += [
+    os.path.join(root, 'public'),
     os.path.join(root, 'src', 'core'),
     os.path.join(root, 'src', 'baker'),
   os.path.join(root, 'third_party'),

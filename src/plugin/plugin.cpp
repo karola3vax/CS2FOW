@@ -217,6 +217,25 @@ bool plugin::Load(PluginId id, ISmmAPI *ismm, char *error, size_t maxlen, bool l
 	return true;
 }
 
+void *plugin::OnMetamodQuery(const char *iface, int *ret)
+{
+	if (iface != nullptr && std::strcmp(iface, CS2FOW_VISIBILITY_INTERFACE) == 0)
+	{
+		if (ret != nullptr) *ret = META_IFACE_OK;
+		return static_cast<ICS2FOWVisibility *>(this);
+	}
+	if (ret != nullptr) *ret = META_IFACE_FAILED;
+	return nullptr;
+}
+
+VisibilityStatus plugin::CopyLatest(SnapshotV1 *output, uint32_t output_size) const noexcept
+{
+	const ProviderStateV1 state = cs2fow_enable.Get() ? provider_state_ : ProviderStateV1::disabled;
+	const std::shared_ptr<const visibility_result> result = state == ProviderStateV1::ready
+		? worker_.result() : std::shared_ptr<const visibility_result> {};
+	return copy_visibility_snapshot_v1(result.get(), state, std::chrono::steady_clock::now(), output, output_size);
+}
+
 bool plugin::Unload(char *error, size_t max_length)
 {
 	if (game_events_ != nullptr) game_events_->RemoveListener(this);
@@ -226,6 +245,7 @@ bool plugin::Unload(char *error, size_t max_length)
 	game_event_load_hook_id_ = 0;
 	automatic_baker_.stop();
 	worker_.stop();
+	provider_state_ = ProviderStateV1::unavailable;
 	if (game_frame_hook_id_ != 0) SH_REMOVE_HOOK_ID(game_frame_hook_id_);
 	if (check_transmit_hook_id_ != 0) SH_REMOVE_HOOK_ID(check_transmit_hook_id_);
 	game_frame_hook_id_ = 0;
@@ -272,6 +292,7 @@ void plugin::OnLevelShutdown()
 	source_ = {};
 	reset_transmit_state();
 	map_.clear();
+	provider_state_ = ProviderStateV1::unavailable;
 	if (prerequisites_valid_)
 	{
 		disabled_reason_ = "no map loaded";
@@ -427,6 +448,7 @@ void plugin::disable(std::string reason)
 	data_ = {};
 	reset_transmit_state();
 	disabled_reason_ = std::move(reason);
+	provider_state_ = ProviderStateV1::unavailable;
 }
 
 bool plugin::resolve_map_source(const std::string &map, map_source &source, std::string &error) const
@@ -513,6 +535,7 @@ void plugin::activate(bvh8_data data)
 	reset_transmit_state();
 	data_ = std::move(data);
 	disabled_reason_.clear();
+	provider_state_ = ProviderStateV1::ready;
 	worker_.start(&data_);
 	META_CONPRINTF("[CS2FOW] active for %s: crc=0x%08x, triangles=%u, nodes=%u, packets=%u\n", map_.c_str(), data_.header.source_crc32,
 		data_.header.triangle_count, data_.header.node_count, data_.header.packet_count);
@@ -534,6 +557,7 @@ void plugin::start_automatic_bake(const std::string &map, const map_source &sour
 		return;
 	}
 	disabled_reason_ = "automatic bake in progress";
+	provider_state_ = ProviderStateV1::baking;
 	META_CONPRINTF("[CS2FOW] %s for %s; starting automatic bake\n", reason.c_str(), map.c_str());
 	automatic_baker_.start({map, source, base.parent_path().parent_path(), output, baker, vrf});
 }
@@ -574,6 +598,7 @@ void plugin::change_map(const std::string &map)
 	source_ = {};
 	reset_transmit_state();
 	map_ = map;
+	provider_state_ = ProviderStateV1::unavailable;
 	if (!prerequisites_valid_)
 	{
 		return;
@@ -631,6 +656,26 @@ void plugin::hook_game_frame(bool simulating, bool first_tick, bool last_tick)
 	visibility_snapshot value;
 	CGlobalVars *globals = network_server->GetGlobals();
 	const float game_time = globals == nullptr ? std::numeric_limits<float>::quiet_NaN() : globals->curtime;
+	value.server_tick = globals == nullptr ? -1 : globals->tickcount;
+	value.server_time = game_time;
+	std::memcpy(value.map.map_name, data_.header.map_name, sizeof(value.map.map_name));
+	value.map.source_size = data_.header.source_size;
+	value.map.source_crc32 = data_.header.source_crc32;
+	value.map.payload_crc32 = data_.header.payload_crc32;
+	value.map.bvh8_version = data_.header.version;
+	value.map.bake_recipe_version = data_.header.bake_recipe_version;
+	value.map.bvh8_flags = data_.header.flags;
+	value.settings.update_interval_ms = static_cast<uint32_t>(cs2fow_update_interval_ms.Get());
+	value.settings.visibility_hold_ms = static_cast<uint32_t>(cs2fow_visibility_hold_ms.Get());
+	value.settings.base_lookahead_ms = static_cast<uint32_t>(cs2fow_base_lookahead_ms.Get());
+	value.settings.max_lookahead_ms = static_cast<uint32_t>(cs2fow_max_lookahead_ms.Get());
+	value.settings.rtt_lookahead_scale = cs2fow_rtt_lookahead_scale.Get();
+	value.settings.max_prediction_units = cs2fow_max_prediction_units.Get();
+	value.settings.shoulder_base_units = cs2fow_shoulder_base_units.Get();
+	value.settings.shoulder_rtt_scale = cs2fow_shoulder_rtt_scale.Get();
+	value.settings.max_shoulder_units = cs2fow_max_shoulder_units.Get();
+	value.settings.he_clear_radius_units = cs2fow_he_clear_radius_units.Get();
+	value.settings.he_clear_seconds = cs2fow_he_clear_seconds.Get();
 	const auto capture_started = std::chrono::steady_clock::now();
 	if (!capture(value, game_time))
 	{

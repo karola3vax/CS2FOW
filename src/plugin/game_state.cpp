@@ -438,6 +438,9 @@ bool plugin::capture(visibility_snapshot &value, float game_time)
 		player_state player;
 		player.team = live.team;
 		player.pawn_entity = live.pawn_entity;
+		const CEntityHandle handle = entity_handle(pawn_entity);
+		player.pawn_handle = static_cast<uint32_t>(handle.ToInt());
+		player.pawn_generation = static_cast<uint32_t>(handle.GetSerialNumber());
 		player.origin = to_vec3(field<Vector>(scene_node, fields_.abs_origin));
 		player.velocity = to_vec3(field<Vector>(pawn_entity, fields_.abs_velocity));
 		player.mins = to_vec3(field<Vector>(collision, fields_.mins));
