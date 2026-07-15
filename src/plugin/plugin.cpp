@@ -48,6 +48,11 @@ namespace cs2fow
 plugin g_plugin;
 constexpr const char *k_game_event_manager_interface = "GAMEEVENTSMANAGER002";
 
+GameEventKeySymbol_t game_event_key(const char *name)
+{
+	return {CUtlStringToken(MurmurHash2LowerCase(name, STRINGTOKEN_MURMURHASH_SEED)), name};
+}
+
 void *module_base(const void *address)
 {
 #if defined(_WIN32)
@@ -247,7 +252,8 @@ void plugin::FireGameEvent(IGameEvent *event)
 		return;
 	}
 	const float missing = std::numeric_limits<float>::quiet_NaN();
-	const vec3 center {event->GetFloat("x", missing), event->GetFloat("y", missing), event->GetFloat("z", missing)};
+	const vec3 center {event->GetFloat(game_event_key("x"), missing), event->GetFloat(game_event_key("y"), missing),
+		event->GetFloat(game_event_key("z"), missing)};
 	INetworkGameServer *network_server = g_pNetworkServerService == nullptr ? nullptr : g_pNetworkServerService->GetIGameServer();
 	CGlobalVars *globals = network_server == nullptr ? nullptr : network_server->GetGlobals();
 	const float game_time = globals == nullptr ? missing : globals->curtime;

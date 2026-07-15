@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- Verified the private runtime layout and updated the strict Windows/Linux fingerprints for CS2 build `24209309`.
+- Removed the obsolete Valve string-token database import dropped by that update.
+
 ## 0.2.1-preview
 
 - Stopped generic owner/effect links from pulling independent gameplay entities into a hidden player's visual group.
