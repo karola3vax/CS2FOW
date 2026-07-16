@@ -156,6 +156,18 @@ It means CS2FOW would rather show too much than hide the wrong player. If someth
 
 The first time you load a map, `cs2fow_status` may say that an automatic bake is running. You can keep playing, and everyone stays visible until the bake finishes and passes its checks. The optional official-maps ZIP comes with ready-made data, so its included maps skip this first wait.
 
+### Official map releases
+
+Official map data also has its own independent [`maps-v*` release stream](https://github.com/karola3vax/CS2FOW/releases/tag/maps-v1). Every maps tag is permanent, so hosting providers and leagues can safely pin one exact ZIP and checksum without following plugin releases or running the baker.
+
+```sh
+# Find and download the newest maps-only release with GitHub CLI.
+tag="$(gh release list --repo karola3vax/CS2FOW --limit 100 --json tagName --jq '.[].tagName' | grep '^maps-v' | head -n1)"
+gh release download "$tag" --repo karola3vax/CS2FOW --pattern 'cs2fow-official-maps-*.zip' --pattern 'maps-*-SHA256SUMS.txt' --pattern 'maps-*-manifest.json'
+```
+
+Normal CS2FOW releases still include the same official-map package for simple manual installs. The maps-only version changes only when Valve changes a covered map, the covered map list changes, or CS2FOW changes its bake recipe or BVH8 format.
+
 Your server needs an x86-64 CPU with AVX visible to the operating system. CS2FOW also checks that its private engine offsets, called gamedata, match the loaded CS2 server file by size and CRC32. If Valve ships an unknown update, CS2FOW stays off until matching gamedata is installed. That is much safer than guessing inside server memory.
 
 ## The protection boundary
@@ -278,6 +290,7 @@ When the automatic baker or VRF fails, the error includes the newest 8 KiB of th
 ## Developer and project links
 
 - [Releases](https://github.com/karola3vax/CS2FOW/releases): download the Windows, Linux, and official-map packages.
+- [Official map releases](https://github.com/karola3vax/CS2FOW/releases/tag/maps-v1): pin verified map data through the independent `maps-v*` stream.
 - [Code tour](docs/CODE_TOUR.md): follow the architecture, threads, safety rules, and build and release steps in plain language.
 - [Visibility Studio](tools/visibility_point_editor/README.md): see and tune the body, box, and muzzle points used for sight checks.
 - [CS2FOW Map Baker](https://cs2fow-bake-service.onrender.com/): prepare visibility data from a public Workshop map.
