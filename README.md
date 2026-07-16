@@ -149,7 +149,7 @@ It means CS2FOW would rather show too much than hide the wrong player. If someth
 ## Quickstart
 
 1. Install [Metamod:Source](https://www.sourcemm.net/) on your CS2 server.
-2. Grab the Windows or Linux `0.2.1-preview` core ZIP from the [releases page](https://github.com/karola3vax/CS2FOW/releases).
+2. Grab the Windows or Linux `0.2.2-preview` core ZIP from the [releases page](https://github.com/karola3vax/CS2FOW/releases).
 3. Extract it into your server's `game/csgo` folder. Do not rearrange the folders inside the ZIP.
 4. Start your server and load a map.
 5. Type `cs2fow_status` in the server console.

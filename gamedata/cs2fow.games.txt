@@ -1,8 +1,9 @@
+// Verified against CS2 app build 24209309.
 // Update these values when CS2 changes the corresponding engine layouts.
-server_binary_size_windows=32794264
-server_binary_crc32_windows=1853758152
-server_binary_size_linux=40327320
-server_binary_crc32_linux=1509965925
+server_binary_size_windows=32793752
+server_binary_crc32_windows=3260464436
+server_binary_size_linux=40325784
+server_binary_crc32_linux=3013424997
 recipient_slot_offset_windows=576
 recipient_slot_offset_linux=576
 checktransmit_full_update_offset_windows=580
@@ -10,7 +11,7 @@ checktransmit_full_update_offset_linux=580
 game_entity_system_offset_windows=88
 game_entity_system_offset_linux=80
 game_event_manager_vtable_rva_windows=24747912
-game_event_manager_vtable_rva_linux=38396088
+game_event_manager_vtable_rva_linux=38394552
 smoke_volume_offset_windows=2776
 smoke_volume_offset_linux=3504
 smoke_storage_offset_windows=112

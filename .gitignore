@@ -1,5 +1,6 @@
 /build/
 /build-linux/
+/build-*/
 /packages/
 /__pycache__/
 /data/maps/*
