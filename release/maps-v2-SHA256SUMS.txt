@@ -1,0 +1,2 @@
+f04b71ffb9fe1290ba0581d22ed8a198c6376ed5add83fd9ace4020d0c4257d1  cs2fow-official-maps-v2.zip
+5aa96b5d25e80a6001bf7a81c9449eae8728cd7b2c0ea591e9018373c7ac6450  maps-v2-manifest.json
