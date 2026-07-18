@@ -1,6 +1,6 @@
 {
   "version": "0.2.4-preview",
-  "source_commit": "PENDING_AFTER_CI",
+  "source_commit": "8d1e2fb8c04f91193c3326ebc6df0ecd27c48df9",
   "cs2_app_id": 730,
   "cs2_build_id": "24248951",
   "cs2_last_updated_unix": 1784242494,
@@ -32,8 +32,8 @@
     "de_vertigo"
   ],
   "artifacts": {
-    "cs2fow-0.2.4-preview-windows-x86_64.zip": "PENDING_AFTER_CI",
-    "cs2fow-0.2.4-preview-linux-x86_64.zip": "PENDING_AFTER_CI",
-    "cs2fow-0.2.4-preview-official-maps.zip": "PENDING_AFTER_CI"
+    "cs2fow-0.2.4-preview-windows-x86_64.zip": "d53b8e372551481e4ab62d692bf033401651cb4640b07418bb96d7b98e8606c8",
+    "cs2fow-0.2.4-preview-linux-x86_64.zip": "dd7967028eb67ab9c67da221f6e2df6d04816dbc31fc15b3dd82e6e2220b0a38",
+    "cs2fow-0.2.4-preview-official-maps.zip": "eb22e7c6b3d35062dab9a6106b01429a98822b844a1dcff7c45dd95200f9ba95"
   }
 }
