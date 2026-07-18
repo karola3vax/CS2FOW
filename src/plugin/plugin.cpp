@@ -116,9 +116,9 @@ CConVar<int> cs2fow_base_lookahead_ms("cs2fow_base_lookahead_ms", FCVAR_NONE, "F
 CConVar<float> cs2fow_rtt_lookahead_scale("cs2fow_rtt_lookahead_scale", FCVAR_NONE, "Recipient RTT multiplier for movement lookahead", 1.5f, true, 0.0f, true, 4.0f);
 CConVar<int> cs2fow_max_lookahead_ms("cs2fow_max_lookahead_ms", FCVAR_NONE, "Maximum movement and latency lookahead", 375, true, 0, true, 500);
 CConVar<float> cs2fow_max_prediction_units("cs2fow_max_prediction_units", FCVAR_NONE, "Maximum predicted movement per player", 96.0f, true, 0.0f, true, 256.0f);
-CConVar<float> cs2fow_shoulder_base_units("cs2fow_shoulder_base_units", FCVAR_NONE, "Minimum sideways shoulder origin distance", 24.0f, true, 0.0f, true, 256.0f);
-CConVar<float> cs2fow_shoulder_rtt_scale("cs2fow_shoulder_rtt_scale", FCVAR_NONE, "Sideways shoulder units per millisecond of recipient RTT", 0.64f, true, 0.0f, true, 4.0f);
-CConVar<float> cs2fow_max_shoulder_units("cs2fow_max_shoulder_units", FCVAR_NONE, "Maximum sideways shoulder origin distance", 128.0f, true, 0.0f, true, 256.0f);
+CConVar<float> cs2fow_shoulder_base_units("cs2fow_shoulder_base_units", FCVAR_NONE, "Minimum sideways shoulder origin distance", 16.0f, true, 0.0f, true, 256.0f);
+CConVar<float> cs2fow_shoulder_rtt_scale("cs2fow_shoulder_rtt_scale", FCVAR_NONE, "Sideways shoulder units per millisecond of recipient RTT", 0.48f, true, 0.0f, true, 4.0f);
+CConVar<float> cs2fow_max_shoulder_units("cs2fow_max_shoulder_units", FCVAR_NONE, "Maximum sideways shoulder origin distance", 96.0f, true, 0.0f, true, 256.0f);
 CConVar<int> cs2fow_visibility_hold_ms("cs2fow_visibility_hold_ms", FCVAR_NONE, "Minimum revealed duration", 16, true, 0, true, 1000);
 CConVar<bool> cs2fow_debug("cs2fow_debug", FCVAR_NONE, "Enable CS2FOW diagnostic logging", false);
 
@@ -189,6 +189,7 @@ bool plugin::Load(PluginId id, ISmmAPI *ismm, char *error, size_t maxlen, bool l
 		game_events_ = static_cast<IGameEventManager2 *>(ismm->VInterfaceMatch(ismm->GetServerFactory(), k_game_event_manager_interface));
 	}
 	META_CONVAR_REGISTER(FCVAR_RELEASE | FCVAR_GAMEDLL);
+	teammates_are_enemies_ = cvar_->FindConVar("mp_teammates_are_enemies");
 	engine_->ServerCommand("exec cs2fow.cfg");
 	g_SMAPI->AddListener(this, this);
 
@@ -708,13 +709,21 @@ void plugin::print_status() const
 	META_CONPRINTF("[CS2FOW] smoke enabled=%d available=%d captured=%u he_listener=%d he_active=%u\n",
 		cs2fow_smoke_occlusion.Get() ? 1 : 0, smoke_available ? 1 : 0, result == nullptr ? 0u : result->smoke_count,
 		he_event_available_ ? 1 : 0, result == nullptr ? 0u : result->he_clearance_count);
-	META_CONPRINTF("[CS2FOW] teammate filtering=%d\n", cs2fow_filter_teammates.Get() ? 1 : 0);
+	const bool ffa = teammates_are_enemies();
+	META_CONPRINTF("[CS2FOW] teammate filtering configured=%d ffa=%d effective=%d\n",
+		cs2fow_filter_teammates.Get() ? 1 : 0, ffa ? 1 : 0,
+		visibility_teammate_filter_enabled(cs2fow_filter_teammates.Get(), ffa) ? 1 : 0);
 	std::string bake_map;
 	double bake_elapsed_ms = 0;
 	if (automatic_baker_.status(bake_map, bake_elapsed_ms))
 	{
 		META_CONPRINTF("[CS2FOW] auto-bake map=%s elapsed=%.1fms\n", bake_map.c_str(), bake_elapsed_ms);
 	}
+}
+
+bool plugin::teammates_are_enemies() const
+{
+	return teammates_are_enemies_.IsValidRef() && ConVarRefAbstract(teammates_are_enemies_).GetBool();
 }
 
 } // namespace cs2fow

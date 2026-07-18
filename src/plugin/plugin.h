@@ -43,9 +43,8 @@ inline constexpr uint32_t k_max_module_rva = 512u * 1024u * 1024u;
 inline constexpr uint8_t k_life_alive = 0;
 inline constexpr uint8_t k_team_t = 2;
 inline constexpr uint8_t k_team_ct = 3;
-inline constexpr auto k_lifecycle_fail_open = std::chrono::milliseconds(3000);
+inline constexpr auto k_lifecycle_fail_open = std::chrono::milliseconds(1000);
 inline constexpr auto k_hidden_entity_quarantine = std::chrono::milliseconds(3000);
-inline constexpr auto k_pair_baseline_warmup = std::chrono::milliseconds(1500);
 static_assert(MAX_EDICTS == 16384);
 
 class game_resource_service
@@ -215,12 +214,14 @@ private:
 	bool capture(visibility_snapshot &value, float game_time);
 	bool capture_smokes(const std::array<CEntityInstance *, k_max_smoke_volumes> &entities, size_t count,
 		bool overflow, float game_time, visibility_snapshot &value);
+	bool teammates_are_enemies() const;
 
 	ISmmAPI *api_ {};
 	IServerGameDLL *server_ {};
 	ISource2GameEntities *game_entities_ {};
 	IVEngineServer2 *engine_ {};
 	ICvar *cvar_ {};
+	ConVarRef teammates_are_enemies_;
 	ISchemaSystem *schema_ {};
 	IFileSystem *filesystem_ {};
 	IGameEventManager2 *game_events_ {};

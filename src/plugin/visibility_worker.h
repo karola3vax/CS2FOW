@@ -55,6 +55,11 @@ inline bool visibility_pair_enabled(uint32_t recipient, uint32_t target, const p
 	return from.valid && to.valid && recipient != target && (filter_teammates || from.team != to.team);
 }
 
+inline bool visibility_teammate_filter_enabled(bool configured, bool teammates_are_enemies)
+{
+	return configured || teammates_are_enemies;
+}
+
 struct visibility_snapshot
 {
 	uint64_t sequence {};

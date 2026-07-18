@@ -181,7 +181,7 @@ CS2FOW keeps its hands off as much of the game as possible. It hides only this s
 
 Everything that matters on its own stays on its own. A planted C4, dropped objective, dropped weapon, flying grenade, inferno, sound, or unknown entity does not disappear just because the player who once owned it is hidden. Your server still controls movement, collision, hit registration, damage, penetration, and game rules exactly as before.
 
-CS2FOW does not filter HLTV, spectators, dead players, or your own player. Teammates stay visible by default. If you set `cs2fow_filter_teammates 1`, living teammates use the same visibility check, which can also remove their client-side markers and radar information while hidden.
+CS2FOW does not filter HLTV, spectators, dead players, or your own player. Teammates stay visible by default. FFA is detected automatically through `mp_teammates_are_enemies`; when it is `1`, every other living player is treated as an enemy. You can also set `cs2fow_filter_teammates 1` to apply the same check to teammates in normal team modes, which can remove their client-side markers and radar information while hidden.
 
 Live smoke can block those imaginary sight lines too. By default, an HE opens a 100-unit viewing channel through affected smoke for 2.5 seconds, but only if the smoke was already there when the HE exploded. A wall still wins, and another overlapping smoke can still block the view.
 
@@ -237,15 +237,15 @@ The debug buffer records only primary bits CS2FOW truly removed. Turning debug o
 | `cs2fow_smoke_occlusion` | `1` | Let live smoke block sight. If CS2FOW cannot safely read the smoke data, smoke steps aside while wall protection keeps working. |
 | `cs2fow_he_clear_radius_units` | `100` | Set how wide an HE-opened viewing channel is. Use `0` to turn HE clearing off. |
 | `cs2fow_he_clear_seconds` | `2.5` | Set how long an HE-opened viewing channel lasts. Use `0` to turn HE clearing off. |
-| `cs2fow_filter_teammates` | `0` | Give living teammates the same visibility checks as enemies. |
+| `cs2fow_filter_teammates` | `0` | Give living teammates the same visibility checks as enemies. FFA mode is detected automatically. |
 | `cs2fow_update_interval_ms` | `1` | Wait at least this many milliseconds before sending another picture of the players to the worker. |
 | `cs2fow_base_lookahead_ms` | `75` | Start movement prediction this many milliseconds ahead before ping is added. |
 | `cs2fow_rtt_lookahead_scale` | `1.5` | Multiply the viewing player's round-trip ping by this amount when looking ahead. |
 | `cs2fow_max_lookahead_ms` | `375` | Never look farther ahead than this many milliseconds. Use `0` to turn movement prediction off. |
 | `cs2fow_max_prediction_units` | `96` | Never move either player's predicted position farther than this. Use `0` to turn movement prediction off. |
-| `cs2fow_shoulder_base_units` | `24` | Start the left and right viewing points this far from the player's eye. |
-| `cs2fow_shoulder_rtt_scale` | `0.64` | Add this many shoulder units for each millisecond of the viewing player's round-trip ping. |
-| `cs2fow_max_shoulder_units` | `128` | Never push the left and right viewing points farther out than this. |
+| `cs2fow_shoulder_base_units` | `16` | Start the left and right viewing points this far from the player's eye. |
+| `cs2fow_shoulder_rtt_scale` | `0.48` | Add this many shoulder units for each millisecond of the viewing player's round-trip ping. |
+| `cs2fow_max_shoulder_units` | `96` | Never push the left and right viewing points farther out than this. |
 | `cs2fow_visibility_hold_ms` | `16` | Once a player becomes visible, keep them visible for at least this long to prevent flicker. |
 | `cs2fow_debug` | `0` | Save evidence about entity bits CS2FOW actually removed. It does not spam the console. |
 

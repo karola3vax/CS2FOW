@@ -47,7 +47,6 @@ struct pair_guard
 	lifecycle_key recipient_key;
 	lifecycle_key target_key;
 	visual_group_key target_visual_group;
-	std::chrono::steady_clock::time_point fail_open_until {};
 	uint64_t baseline_sequence {};
 	bool baseline_opened {};
 	bool visual_group_initialized {};
@@ -108,9 +107,8 @@ inline visual_group_key make_visual_group_key(const std::array<uint32_t, max_cou
 	return key;
 }
 
-inline void pair_reset_baseline(pair_guard &guard, std::chrono::steady_clock::time_point now, std::chrono::milliseconds warmup)
+inline void pair_reset_baseline(pair_guard &guard)
 {
-	guard.fail_open_until = now + warmup;
 	guard.baseline_sequence = 0;
 	guard.baseline_opened = false;
 }
@@ -132,13 +130,13 @@ inline bool lifecycle_allows_hiding(const lifecycle_guard &guard, std::chrono::s
 }
 
 inline bool update_pair_guard(pair_guard &guard, const lifecycle_key &recipient_key, bool recipient_stable,
-	const lifecycle_key &target_key, bool target_stable, std::chrono::steady_clock::time_point now, std::chrono::milliseconds warmup)
+	const lifecycle_key &target_key, bool target_stable)
 {
 	const bool reset = !guard.initialized || lifecycle_changed(guard.recipient_key, recipient_key)
 		|| lifecycle_changed(guard.target_key, target_key) || !recipient_stable || !target_stable;
 	if (reset)
 	{
-		pair_reset_baseline(guard, now, warmup);
+		pair_reset_baseline(guard);
 		guard.target_visual_group = {};
 		guard.visual_group_initialized = false;
 	}
@@ -148,29 +146,28 @@ inline bool update_pair_guard(pair_guard &guard, const lifecycle_key &recipient_
 	return reset;
 }
 
-inline void update_pair_visual_group(pair_guard &guard, const visual_group_key &key,
-	std::chrono::steady_clock::time_point now, std::chrono::milliseconds warmup)
+inline void update_pair_visual_group(pair_guard &guard, const visual_group_key &key)
 {
 	if (!guard.visual_group_initialized || visual_group_changed(guard.target_visual_group, key))
 	{
-		pair_reset_baseline(guard, now, warmup);
+		pair_reset_baseline(guard);
 	}
 	guard.target_visual_group = key;
 	guard.visual_group_initialized = true;
 }
 
-inline void pair_note_open(pair_guard &guard, std::chrono::steady_clock::time_point now, uint64_t sequence)
+inline void pair_note_open(pair_guard &guard, uint64_t sequence)
 {
-	if (guard.initialized && now >= guard.fail_open_until && !guard.baseline_opened)
+	if (guard.initialized && !guard.baseline_opened)
 	{
 		guard.baseline_sequence = sequence;
 		guard.baseline_opened = true;
 	}
 }
 
-inline bool pair_allows_hiding(const pair_guard &guard, std::chrono::steady_clock::time_point now, uint64_t sequence)
+inline bool pair_allows_hiding(const pair_guard &guard, uint64_t sequence)
 {
-	return guard.initialized && now >= guard.fail_open_until && guard.baseline_opened && guard.baseline_sequence != sequence;
+	return guard.initialized && guard.baseline_opened && guard.baseline_sequence != sequence;
 }
 
 template <typename handle_type, size_t max_count>

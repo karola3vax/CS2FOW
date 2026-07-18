@@ -246,7 +246,7 @@ void test_smoke_occlusion()
 void test_visibility_sampling()
 {
 	const bvh8_data open = test_world({{{10000, 10000, 10000}, {10001, 10000, 10000}, {10000, 10001, 10000}}});
-	const visibility_tuning tuning {75, 1.5f, 375, 96.0f, 24.0f, 0.64f, 128.0f};
+	const visibility_tuning tuning {75, 1.5f, 375, 96.0f, 16.0f, 0.48f, 96.0f};
 	visibility_player player {};
 	player.eye = {0, 0, 0};
 	player.origin = {0, 0, 0};
@@ -260,16 +260,16 @@ void test_visibility_sampling()
 	assert(std::fabs(visibility_effective_lookahead_seconds(0.15f, tuning) - 0.3f) < 0.001f);
 	assert(std::fabs(visibility_effective_lookahead_seconds(0.2f, tuning) - 0.375f) < 0.001f);
 	assert(std::fabs(visibility_effective_lookahead_seconds(0.5f, tuning) - 0.375f) < 0.001f);
-	assert(std::fabs(visibility_effective_lookahead_seconds(0.1f, {75, 0.0f, 375, 96.0f, 24.0f, 0.64f, 128.0f}) - 0.075f) < 0.001f);
-	assert(std::fabs(visibility_effective_lookahead_seconds(0.0f, {200, 1.5f, 100, 96.0f, 24.0f, 0.64f, 128.0f}) - 0.1f) < 0.001f);
-	assert(std::fabs(visibility_shoulder_offset_units(-1.0f, tuning) - 24.0f) < 0.01f);
-	assert(std::fabs(visibility_shoulder_offset_units(0.0f, tuning) - 24.0f) < 0.01f);
-	assert(std::fabs(visibility_shoulder_offset_units(0.05f, tuning) - 32.0f) < 0.01f);
-	assert(std::fabs(visibility_shoulder_offset_units(0.075f, tuning) - 48.0f) < 0.01f);
-	assert(std::fabs(visibility_shoulder_offset_units(0.1f, tuning) - 64.0f) < 0.01f);
-	assert(std::fabs(visibility_shoulder_offset_units(0.15f, tuning) - 96.0f) < 0.01f);
-	assert(std::fabs(visibility_shoulder_offset_units(0.2f, tuning) - 128.0f) < 0.01f);
-	assert(std::fabs(visibility_shoulder_offset_units(0.3f, tuning) - 128.0f) < 0.01f);
+	assert(std::fabs(visibility_effective_lookahead_seconds(0.1f, {75, 0.0f, 375, 96.0f, 16.0f, 0.48f, 96.0f}) - 0.075f) < 0.001f);
+	assert(std::fabs(visibility_effective_lookahead_seconds(0.0f, {200, 1.5f, 100, 96.0f, 16.0f, 0.48f, 96.0f}) - 0.1f) < 0.001f);
+	assert(std::fabs(visibility_shoulder_offset_units(-1.0f, tuning) - 16.0f) < 0.01f);
+	assert(std::fabs(visibility_shoulder_offset_units(0.0f, tuning) - 16.0f) < 0.01f);
+	assert(std::fabs(visibility_shoulder_offset_units(0.05f, tuning) - 24.0f) < 0.01f);
+	assert(std::fabs(visibility_shoulder_offset_units(0.075f, tuning) - 36.0f) < 0.01f);
+	assert(std::fabs(visibility_shoulder_offset_units(0.1f, tuning) - 48.0f) < 0.01f);
+	assert(std::fabs(visibility_shoulder_offset_units(0.15f, tuning) - 72.0f) < 0.01f);
+	assert(std::fabs(visibility_shoulder_offset_units(0.2f, tuning) - 96.0f) < 0.01f);
+	assert(std::fabs(visibility_shoulder_offset_units(0.3f, tuning) - 96.0f) < 0.01f);
 
 	assert(visibility_prediction_offset({0, 0, 0}, 0.15f, 96.0f).x == 0.0f);
 	assert(visibility_prediction_offset({74, 0, 0}, 0.15f, 96.0f).x == 0.0f);
@@ -295,23 +295,23 @@ void test_visibility_sampling()
 	assert(k_visibility_origin_count == 8);
 	assert(k_visibility_ray_count_max == 384);
 	assert(std::fabs(origins[1].x - 7.5f) < 0.01f && origins[1].y == 0.0f);
-	assert(std::fabs(origins[2].y - 24.0f) < 0.01f);
-	assert(std::fabs(origins[3].y + 24.0f) < 0.01f);
-	assert(std::fabs(origins[4].x - 7.5f) < 0.01f && std::fabs(origins[4].y - 24.0f) < 0.01f);
-	assert(std::fabs(origins[5].x - 7.5f) < 0.01f && std::fabs(origins[5].y + 24.0f) < 0.01f);
+	assert(std::fabs(origins[2].y - 16.0f) < 0.01f);
+	assert(std::fabs(origins[3].y + 16.0f) < 0.01f);
+	assert(std::fabs(origins[4].x - 7.5f) < 0.01f && std::fabs(origins[4].y - 16.0f) < 0.01f);
+	assert(std::fabs(origins[5].x - 7.5f) < 0.01f && std::fabs(origins[5].y + 16.0f) < 0.01f);
 	assert(std::fabs(origins[6].z - 16.0f) < 0.01f);
 	assert(std::fabs(origins[7].x - 7.5f) < 0.01f && std::fabs(origins[7].z - 16.0f) < 0.01f);
 	player.rtt_seconds = 0.05f;
 	origins = visibility_origins(open, player, visibility_effective_lookahead_seconds(player.rtt_seconds, tuning), tuning);
-	assert(std::fabs(origins[2].y - 32.0f) < 0.01f && std::fabs(origins[3].y + 32.0f) < 0.01f);
-	assert(std::fabs(origins[4].y - 32.0f) < 0.01f && std::fabs(origins[5].y + 32.0f) < 0.01f);
+	assert(std::fabs(origins[2].y - 24.0f) < 0.01f && std::fabs(origins[3].y + 24.0f) < 0.01f);
+	assert(std::fabs(origins[4].y - 24.0f) < 0.01f && std::fabs(origins[5].y + 24.0f) < 0.01f);
 	player.rtt_seconds = 0.0f;
 
 	player.velocity = {};
 	player.eye_yaw_degrees = 90.0f;
 	origins = visibility_origins(open, player, visibility_effective_lookahead_seconds(0.0f, tuning), tuning);
-	assert(std::fabs(origins[2].x + 24.0f) < 0.01f);
-	assert(std::fabs(origins[3].x - 24.0f) < 0.01f);
+	assert(std::fabs(origins[2].x + 16.0f) < 0.01f);
+	assert(std::fabs(origins[3].x - 16.0f) < 0.01f);
 	player.eye_yaw_degrees = 0.0f;
 
 	player.velocity = {0, 100, 0};
@@ -368,13 +368,13 @@ void test_visibility_sampling()
 	assert(current_targets.count == 24);
 	assert(no_recipient_lookahead.count == 24);
 	assert(swept_targets.count == 48);
-	assert(std::fabs(min_x(current_targets) + 24.0f) < 0.01f);
+	assert(std::fabs(min_x(current_targets) + 20.0f) < 0.01f);
 	assert(std::fabs(max_x(current_targets) - 36.0f) < 0.01f);
-	assert(current_targets.points[0].z == 0.0f && current_targets.points[7].z == 80.0f);
-	assert(std::fabs(swept_targets.points[0].x + 24.0f) < 0.01f);
-	assert(std::fabs(swept_targets.points[7].x - 24.0f) < 0.01f);
-	assert(std::fabs(swept_targets.points[8].x + 9.0f) < 0.01f);
-	assert(std::fabs(swept_targets.points[15].x - 39.0f) < 0.01f);
+	assert(current_targets.points[0].z == 0.0f && current_targets.points[7].z == 76.0f);
+	assert(std::fabs(swept_targets.points[0].x + 20.0f) < 0.01f);
+	assert(std::fabs(swept_targets.points[7].x - 20.0f) < 0.01f);
+	assert(std::fabs(swept_targets.points[8].x + 5.0f) < 0.01f);
+	assert(std::fabs(swept_targets.points[15].x - 35.0f) < 0.01f);
 	assert(std::fabs(max_x(no_recipient_lookahead) - max_x(current_targets)) < 0.01f);
 	assert(max_x(swept_targets) > max_x(current_targets) + 9.0f);
 
@@ -390,7 +390,7 @@ void test_visibility_sampling()
 	const auto blocked_target_prediction = visibility_targets(wall, target,
 		visibility_effective_lookahead_seconds(0.0f, tuning), tuning.max_prediction_units);
 	assert(blocked_target_prediction.count == 48);
-	assert(blocked_target_prediction.points[15].x > 27.9f && blocked_target_prediction.points[15].x < 28.1f);
+	assert(blocked_target_prediction.points[15].x > 23.9f && blocked_target_prediction.points[15].x < 24.1f);
 
 	target.velocity = {};
 	target.eye_yaw_degrees = 0.0f;
@@ -443,6 +443,11 @@ void test_visibility_sampling()
 
 void test_visibility_worker()
 {
+	assert(!visibility_teammate_filter_enabled(false, false));
+	assert(visibility_teammate_filter_enabled(true, false));
+	assert(visibility_teammate_filter_enabled(false, true));
+	assert(visibility_teammate_filter_enabled(true, true));
+
 	const bvh8_data wall = test_world({
 		{{32, -1000, -1000}, {32, 1000, -1000}, {32, -1000, 1000}},
 		{{32, 1000, 1000}, {32, -1000, 1000}, {32, 1000, -1000}}
@@ -451,6 +456,7 @@ void test_visibility_worker()
 	value.sequence = 1;
 	value.players[0] = {true, 2, {0, 0, 64}, {0, 0, 0}, {}, {-16, -16, 0}, {16, 16, 72}};
 	value.players[1] = {true, 3, {64, 0, 64}, {64, 0, 0}, {}, {-16, -16, 0}, {16, 16, 72}};
+	const visibility_tuning tuning {75, 1.5f, 375, 96.0f, 16.0f, 0.48f, 96.0f};
 
 	auto worker = std::make_unique<visibility_worker>();
 	worker->start(&wall);
@@ -465,38 +471,38 @@ void test_visibility_worker()
 		}
 		return result;
 	};
-	worker->submit(value, 16, {75, 1.5f, 375, 96.0f, 24.0f, 0.64f, 128.0f});
+	worker->submit(value, 16, tuning);
 	auto result = wait_for(1);
 	assert(result && !result->visible[0][1]);
 
 	value.sequence = 2;
 	value.players[1].eye.x = 16;
 	value.players[1].origin.x = 16;
-	worker->submit(value, 16, {75, 1.5f, 375, 96.0f, 24.0f, 0.64f, 128.0f});
+	worker->submit(value, 16, tuning);
 	result = wait_for(2);
 	assert(result && result->visible[0][1]);
 
 	value.sequence = 3;
 	value.players[1].eye.x = 64;
 	value.players[1].origin.x = 64;
-	worker->submit(value, 16, {75, 1.5f, 375, 96.0f, 24.0f, 0.64f, 128.0f});
+	worker->submit(value, 16, tuning);
 	result = wait_for(3);
 	assert(result && result->visible[0][1]);
 
 	std::this_thread::sleep_for(std::chrono::milliseconds(20));
 	value.sequence = 4;
-	worker->submit(value, 16, {75, 1.5f, 375, 96.0f, 24.0f, 0.64f, 128.0f});
+	worker->submit(value, 16, tuning);
 	result = wait_for(4);
 	assert(result && !result->visible[0][1]);
 	value.players[1].team = 2;
 	value.sequence = 5;
 	value.filter_teammates = false;
-	worker->submit(value, 16, {75, 1.5f, 375, 96.0f, 24.0f, 0.64f, 128.0f});
+	worker->submit(value, 16, tuning);
 	result = wait_for(5);
 	assert(result && result->visible[0][1] && result->evaluated_pairs == 0 && !result->filter_teammates);
 	value.sequence = 6;
 	value.filter_teammates = true;
-	worker->submit(value, 16, {75, 1.5f, 375, 96.0f, 24.0f, 0.64f, 128.0f});
+	worker->submit(value, 16, tuning);
 	result = wait_for(6);
 	assert(result && !result->visible[0][1] && result->evaluated_pairs == 2 && result->filter_teammates);
 	assert(worker->stats().cycles == 6);
@@ -518,7 +524,7 @@ void test_visibility_worker()
 	value.smoke_enabled = true;
 	value.smoke_available = true;
 	value.smokes = smokes;
-	worker->submit(value, 0, {75, 1.5f, 375, 96.0f, 24.0f, 0.64f, 128.0f});
+	worker->submit(value, 0, tuning);
 	result = wait_for(7);
 	assert(result && !result->visible[0][1] && result->smoke_count == 1);
 	smokes->volumes.back().density.fill(0.0f);
@@ -529,20 +535,20 @@ void test_visibility_worker()
 	}
 	assert(smoke_line_blocked(*smokes, {0, 0, 64}, {64, 0, 64}));
 	value.sequence = 8;
-	worker->submit(value, 0, {75, 1.5f, 375, 96.0f, 24.0f, 0.64f, 128.0f});
+	worker->submit(value, 0, tuning);
 	result = wait_for(8);
 	assert(result && result->visible[0][1]);
 	smokes->volumes.back().opaque_cells.fill(0);
 	smokes->volumes.back().density.fill(50.0f);
 	value.sequence = 9;
 	value.filter_teammates = false;
-	worker->submit(value, 0, {75, 1.5f, 375, 96.0f, 24.0f, 0.64f, 128.0f});
+	worker->submit(value, 0, tuning);
 	result = wait_for(9);
 	assert(result && result->visible[0][1] && result->evaluated_pairs == 0);
 	value.sequence = 10;
 	value.filter_teammates = true;
 	value.smoke_available = false;
-	worker->submit(value, 0, {75, 1.5f, 375, 96.0f, 24.0f, 0.64f, 128.0f});
+	worker->submit(value, 0, tuning);
 	result = wait_for(10);
 	assert(result && result->visible[0][1]);
 	smokes->he_clear_radius_units = 100.0f;
@@ -552,13 +558,13 @@ void test_visibility_worker()
 	value.sequence = 11;
 	value.captured = std::chrono::steady_clock::now();
 	value.smoke_available = true;
-	worker->submit(value, 0, {75, 1.5f, 375, 96.0f, 24.0f, 0.64f, 128.0f});
+	worker->submit(value, 0, tuning);
 	result = wait_for(11);
 	assert(result && result->visible[0][1] && result->he_clearance_count == 1);
 	smokes->he_clearances[0].age_seconds = 3.0f;
 	value.sequence = 12;
 	value.captured = std::chrono::steady_clock::now();
-	worker->submit(value, 0, {75, 1.5f, 375, 96.0f, 24.0f, 0.64f, 128.0f});
+	worker->submit(value, 0, tuning);
 	result = wait_for(12);
 	assert(result && !result->visible[0][1]);
 	worker->stop();
@@ -623,9 +629,6 @@ void test_visual_group_key()
 
 void test_pair_guard()
 {
-	using clock = std::chrono::steady_clock;
-	const auto warmup = std::chrono::milliseconds(1500);
-	const auto start = clock::time_point {} + std::chrono::seconds(20);
 	lifecycle_key recipient;
 	recipient.has_controller = true;
 	recipient.pawn_entity = 10;
@@ -636,52 +639,49 @@ void test_pair_guard()
 	target.team = 3;
 
 	pair_guard guard;
-	assert(update_pair_guard(guard, recipient, true, target, true, start, warmup));
-	assert(!update_pair_guard(guard, recipient, true, target, true, start, warmup));
-	assert(!pair_allows_hiding(guard, start + std::chrono::milliseconds(1499), 1));
-	pair_note_open(guard, start + std::chrono::milliseconds(1499), 1);
-	assert(!pair_allows_hiding(guard, start + std::chrono::milliseconds(1500), 1));
-	pair_note_open(guard, start + std::chrono::milliseconds(1500), 1);
-	assert(!pair_allows_hiding(guard, start + std::chrono::milliseconds(1501), 1));
-	assert(pair_allows_hiding(guard, start + std::chrono::milliseconds(1501), 2));
+	assert(update_pair_guard(guard, recipient, true, target, true));
+	assert(!update_pair_guard(guard, recipient, true, target, true));
+	assert(!pair_allows_hiding(guard, 1));
+	pair_note_open(guard, 1);
+	assert(!pair_allows_hiding(guard, 1));
+	assert(pair_allows_hiding(guard, 2));
 
 	pair_guard visual_guard;
 	const visual_group_key group = test_visual_key({10, 20, 30});
 	const visual_group_key same_group = test_visual_key({30, 20, 10, 10});
 	const visual_group_key changed_group = test_visual_key({10, 20, 31});
-	update_pair_guard(visual_guard, recipient, true, target, true, start, warmup);
-	update_pair_visual_group(visual_guard, group, start, warmup);
-	assert(!pair_allows_hiding(visual_guard, start + std::chrono::milliseconds(1499), 1));
-	pair_note_open(visual_guard, start + std::chrono::milliseconds(1500), 1);
-	assert(pair_allows_hiding(visual_guard, start + std::chrono::milliseconds(1500), 2));
-	update_pair_visual_group(visual_guard, same_group, start + std::chrono::milliseconds(1600), warmup);
-	assert(pair_allows_hiding(visual_guard, start + std::chrono::milliseconds(1600), 3));
-	update_pair_visual_group(visual_guard, changed_group, start + std::chrono::milliseconds(1700), warmup);
-	assert(!pair_allows_hiding(visual_guard, start + std::chrono::milliseconds(3199), 4));
-	pair_note_open(visual_guard, start + std::chrono::milliseconds(3200), 4);
-	assert(!pair_allows_hiding(visual_guard, start + std::chrono::milliseconds(3200), 4));
-	assert(pair_allows_hiding(visual_guard, start + std::chrono::milliseconds(3200), 5));
+	update_pair_guard(visual_guard, recipient, true, target, true);
+	update_pair_visual_group(visual_guard, group);
+	assert(!pair_allows_hiding(visual_guard, 1));
+	pair_note_open(visual_guard, 1);
+	assert(pair_allows_hiding(visual_guard, 2));
+	update_pair_visual_group(visual_guard, same_group);
+	assert(pair_allows_hiding(visual_guard, 3));
+	update_pair_visual_group(visual_guard, changed_group);
+	assert(!pair_allows_hiding(visual_guard, 4));
+	pair_note_open(visual_guard, 4);
+	assert(!pair_allows_hiding(visual_guard, 4));
+	assert(pair_allows_hiding(visual_guard, 5));
 
 	lifecycle_key changed = target;
 	changed.team = 2;
-	assert(update_pair_guard(guard, recipient, true, changed, true, start + std::chrono::milliseconds(2000), warmup));
-	assert(!pair_allows_hiding(guard, start + std::chrono::milliseconds(3499), 3));
-	pair_note_open(guard, start + std::chrono::milliseconds(3500), 3);
-	assert(!pair_allows_hiding(guard, start + std::chrono::milliseconds(3500), 3));
-	assert(pair_allows_hiding(guard, start + std::chrono::milliseconds(3500), 4));
+	assert(update_pair_guard(guard, recipient, true, changed, true));
+	assert(!pair_allows_hiding(guard, 3));
+	pair_note_open(guard, 3);
+	assert(!pair_allows_hiding(guard, 3));
+	assert(pair_allows_hiding(guard, 4));
 
 	lifecycle_key dead = changed;
 	dead.alive = false;
-	assert(update_pair_guard(guard, recipient, true, dead, false, start + std::chrono::milliseconds(4000), warmup));
-	assert(update_pair_guard(guard, recipient, true, dead, false, start + std::chrono::milliseconds(4500), warmup));
-	pair_note_open(guard, start + std::chrono::milliseconds(5999), 5);
-	assert(!pair_allows_hiding(guard, start + std::chrono::milliseconds(5999), 6));
+	assert(update_pair_guard(guard, recipient, true, dead, false));
+	assert(update_pair_guard(guard, recipient, true, dead, false));
+	assert(!pair_allows_hiding(guard, 6));
 
-	assert(update_pair_guard(guard, recipient, true, changed, true, start + std::chrono::milliseconds(6000), warmup));
-	assert(!pair_allows_hiding(guard, start + std::chrono::milliseconds(7499), 7));
-	pair_note_open(guard, start + std::chrono::milliseconds(7500), 7);
-	assert(!pair_allows_hiding(guard, start + std::chrono::milliseconds(7500), 7));
-	assert(pair_allows_hiding(guard, start + std::chrono::milliseconds(7500), 8));
+	assert(update_pair_guard(guard, recipient, true, changed, true));
+	assert(!pair_allows_hiding(guard, 7));
+	pair_note_open(guard, 7);
+	assert(!pair_allows_hiding(guard, 7));
+	assert(pair_allows_hiding(guard, 8));
 }
 
 struct test_transmit_mask
@@ -827,7 +827,7 @@ void test_hidden_entity_group()
 double benchmark_worker_loop(const bvh8_data &data, const std::string &label)
 {
 	constexpr uint32_t k_players = 32;
-	const visibility_tuning tuning {75, 1.5f, 375, 96.0f, 24.0f, 0.64f, 128.0f};
+	const visibility_tuning tuning {75, 1.5f, 375, 96.0f, 16.0f, 0.48f, 96.0f};
 	std::mt19937 random(0x51f0u);
 	std::uniform_real_distribution<float> x(data.header.world_min[0], data.header.world_max[0]);
 	std::uniform_real_distribution<float> y(data.header.world_min[1], data.header.world_max[1]);

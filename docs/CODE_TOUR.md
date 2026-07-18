@@ -122,8 +122,8 @@ The finished immutable result contains its sequence, capture/completion times, r
 2. Lock `transmit_state_mutex_`. This protects lifecycle, pair-baseline, quarantined-group, and debug state shared with game-frame capture and console commands. Ray traversal and file work never run under this lock.
 3. First scan the recipients for CS2 full updates. For those recipients, clear stored hidden groups, but do not alter that full-update snapshot.
 4. Re-read live recipient/target lifecycles and visual groups. Any mismatch with the copied worker player fails open.
-5. Skip self, invalid players, and full-update snapshots. Skip teammates only when optional teammate filtering is disabled.
-6. Require a stable player pair, a warmup period, and evidence that a complete current visual group was previously sent on an older worker sequence before the pair is allowed to hide.
+5. Skip self, invalid players, and full-update snapshots. Skip teammates only when optional teammate filtering and `mp_teammates_are_enemies` are both disabled.
+6. Require a stable player pair and evidence that a complete current visual group was previously sent on an older worker sequence before the pair is allowed to hide.
 7. When hidden, store the exact visual group. For each member whose primary bit is set, set the matching bit through the existing second `CCheckTransmitInfo` pointer, locally treated as `dont_transmit`, and only then clear the primary bit.
 8. If either paired-list pointer is unavailable, change neither list and fail open. If a primary bit is already clear, leave both bits alone.
 9. If rays later say visible, stop withholding the current group and let ordinary snapshots handle it; CS2FOW does not wait for or request a full update.
@@ -152,7 +152,7 @@ The BVH8 data is loaded before the worker starts and remains unchanged until tha
 - Only set primary bits and their matching verified `dont_transmit` bits are changed; either missing pointer fails open.
 - The worker receives copied data and never dereferences engine objects.
 - CheckTransmit uses fixed-size visual groups, caches, and debug records; it performs no heap allocation.
-- Player/visual-group lifetime changes reset pair baselines and create a warmup instead of hiding immediately.
+- Player/visual-group lifetime changes reset pair baselines instead of hiding immediately.
 - Enabling/disabling filtering resets lifecycle, pair, and hidden-group state but preserves collected debug evidence.
 - A map change, level shutdown, or normal plugin-state reset also clears debug evidence.
 - Worker start resets pending/published work, cached blocking packets, reveal holds, and timing/pair statistics.

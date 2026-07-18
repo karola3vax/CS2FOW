@@ -405,7 +405,8 @@ bool plugin::capture(visibility_snapshot &value, float game_time)
 	size_t smoke_count = 0;
 	bool smoke_overflow = false;
 	collect_smoke_entities(system, smoke_entities, smoke_count, smoke_overflow);
-	value.filter_teammates = cs2fow_filter_teammates.Get();
+	value.filter_teammates = visibility_teammate_filter_enabled(
+		cs2fow_filter_teammates.Get(), teammates_are_enemies());
 	value.smoke_enabled = cs2fow_smoke_occlusion.Get();
 	value.smoke_available = smoke_schema_available_ && smoke_gamedata_available_;
 	if (value.smoke_enabled && value.smoke_available
@@ -463,7 +464,7 @@ bool plugin::capture(visibility_snapshot &value, float game_time)
 		for (uint32_t target = 0; target < k_max_players; ++target)
 		{
 			if (update_pair_guard(pair_guards_[recipient][target], keys[recipient], stable_slots[recipient],
-				keys[target], stable_slots[target], now, k_pair_baseline_warmup)
+				keys[target], stable_slots[target])
 				&& hidden_groups_[recipient][target].count != 0)
 			{
 				hidden_group_clear(hidden_groups_[recipient][target]);

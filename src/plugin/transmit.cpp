@@ -255,22 +255,22 @@ void plugin::hook_check_transmit(CCheckTransmitInfo **infos, int count, CBitVec<
 			const bool full_group_marked = cache.group_valid && group_fully_marked(system, info->m_pTransmitEntity, cache.group);
 			if (cache.group_valid)
 			{
-				update_pair_visual_group(guard, cache.group_key, now, k_pair_baseline_warmup);
+				update_pair_visual_group(guard, cache.group_key);
 			}
 			if (result->visible[slot][target])
 			{
 				if (full_group_marked)
 				{
-					pair_note_open(guard, now, result->sequence);
+					pair_note_open(guard, result->sequence);
 					hidden_group_clear(stored_group);
 				}
 				continue;
 			}
-			if (!pair_allows_hiding(guard, now, result->sequence))
+			if (!pair_allows_hiding(guard, result->sequence))
 			{
 				if (full_group_marked)
 				{
-					pair_note_open(guard, now, result->sequence);
+					pair_note_open(guard, result->sequence);
 					hidden_group_clear(stored_group);
 				}
 				continue;

@@ -43,9 +43,9 @@ struct visibility_tuning
 	float rtt_lookahead_scale {1.5f};
 	uint32_t max_lookahead_ms {375};
 	float max_prediction_units {96.0f};
-	float shoulder_base_units {24.0f};
-	float shoulder_rtt_scale {0.64f};
-	float max_shoulder_units {128.0f};
+	float shoulder_base_units {16.0f};
+	float shoulder_rtt_scale {0.48f};
+	float max_shoulder_units {96.0f};
 };
 
 struct visibility_target_points
