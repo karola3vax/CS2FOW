@@ -7,7 +7,7 @@
 - Automatically treat every other living player as an enemy when `mp_teammates_are_enemies 1` is active.
 - Reduced the lifecycle fail-open window from 3 seconds to 1 second and removed the separate 1.5-second visual warmup while preserving the complete-group baseline check.
 - Updated Visibility Studio with a second SAS model 256 units away and the same stationary origins, target samples, and ray count used by the runtime.
-- Replaced velocity/lookahead prediction with a ping-scaled WASD-intention origin, added a permanent feet origin, and reduced each pair to current-only target samples with at most 144 rays.
+- Replaced velocity/lookahead prediction with a ping-scaled W/S/diagonal intention origin, added a permanent feet origin, and reduced rays by 37.5% to 62.5% per player pair (from 192-384 to 120-144).
 
 ## 0.2.3-preview
 
