@@ -299,8 +299,8 @@ void test_visibility_sampling()
 	assert(std::fabs(origins[3].y + 24.0f) < 0.01f);
 	assert(std::fabs(origins[4].x - 7.5f) < 0.01f && std::fabs(origins[4].y - 24.0f) < 0.01f);
 	assert(std::fabs(origins[5].x - 7.5f) < 0.01f && std::fabs(origins[5].y + 24.0f) < 0.01f);
-	assert(std::fabs(origins[6].z - 24.0f) < 0.01f);
-	assert(std::fabs(origins[7].x - 7.5f) < 0.01f && std::fabs(origins[7].z - 24.0f) < 0.01f);
+	assert(std::fabs(origins[6].z - 16.0f) < 0.01f);
+	assert(std::fabs(origins[7].x - 7.5f) < 0.01f && std::fabs(origins[7].z - 16.0f) < 0.01f);
 	player.rtt_seconds = 0.05f;
 	origins = visibility_origins(open, player, visibility_effective_lookahead_seconds(player.rtt_seconds, tuning), tuning);
 	assert(std::fabs(origins[2].y - 32.0f) < 0.01f && std::fabs(origins[3].y + 32.0f) < 0.01f);

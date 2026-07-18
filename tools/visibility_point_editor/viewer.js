@@ -1,6 +1,6 @@
 // Local browser editor for body points, generated axis-aligned box corners, and
-// a weapon-muzzle preview. It reads ignored model assets and exports one preset;
-// it does not load maps, cast runtime rays, or change plugin state.
+// a weapon-muzzle preview. It reads ignored model assets, draws the stationary
+// runtime ray layout, and exports one preset without changing plugin state.
 
 import * as THREE from "https://esm.sh/three@0.160.0";
 import {OrbitControls} from "https://esm.sh/three@0.160.0/examples/jsm/controls/OrbitControls.js";
@@ -13,6 +13,14 @@ const k_aabb_color = 0x007c91;
 const k_body_color = 0xa96300;
 const k_selected_color = 0xdf1f2d;
 const k_muzzle_color = 0x92278f;
+const k_ray_color = 0xdf1f2d;
+const k_origin_color = 0x1769aa;
+const k_viewer_distance = 256;
+const k_eye_height = 64;
+const k_shoulder_offset = 24;
+const k_vertical_origin_offset = 16;
+const k_horizontal_bounds_padding = 8;
+const k_top_bounds_padding = 8;
 const k_aabb_dot_radius = 0.022 / 3.0;
 const k_body_dot_radius = 0.03 / 3.0;
 const k_selected_dot_radius = 0.044 / 3.0;
@@ -83,6 +91,7 @@ let orbit;
 let transform;
 let loader;
 let model;
+let viewer_model;
 let manifest_models = {};
 let weapon_model;
 let points = [];
@@ -91,14 +100,17 @@ let selected_index = 0;
 let marker_group;
 let aabb_group;
 let muzzle_group;
+let ray_group;
+let origin_group;
+let ray_count = 0;
 let status_extra = "";
 let active_weapon_key = "";
 let model_status = "Model unavailable";
 
 function reset_camera()
 {
-	camera.position.set(4.2, 3.0, 6.2);
-	orbit.target.set(0, 1.0, 0);
+	camera.position.set(8.5, 4.5, 10.5);
+	orbit.target.set(0, 1.0, 3.25);
 	orbit.update();
 }
 
@@ -119,8 +131,16 @@ function format_number(value)
 
 function generated_aabb_points()
 {
-	const min = {x: read_number("min-x"), y: read_number("min-y"), z: read_number("min-z")};
-	const max = {x: read_number("max-x"), y: read_number("max-y"), z: read_number("max-z")};
+	const min = {
+		x: read_number("min-x") - k_horizontal_bounds_padding,
+		y: read_number("min-y") - k_horizontal_bounds_padding,
+		z: read_number("min-z")
+	};
+	const max = {
+		x: read_number("max-x") + k_horizontal_bounds_padding,
+		y: read_number("max-y") + k_horizontal_bounds_padding,
+		z: read_number("max-z") + k_top_bounds_padding
+	};
 	return [
 		{x: min.x, y: min.y, z: min.z}, {x: max.x, y: min.y, z: min.z},
 		{x: min.x, y: max.y, z: min.z}, {x: max.x, y: max.y, z: min.z},
@@ -131,26 +151,78 @@ function generated_aabb_points()
 
 function set_model_opacity()
 {
-	if (!model)
+	const opacity = read_number("model-opacity");
+	for (const root of [model, viewer_model])
+	{
+		root?.traverse((node) =>
+		{
+			if (!node.isMesh)
+			{
+				return;
+			}
+			const materials = Array.isArray(node.material) ? node.material : [node.material];
+			for (const material of materials)
+			{
+				material.transparent = opacity < 1;
+				material.opacity = opacity;
+				material.depthWrite = opacity >= 1;
+				material.needsUpdate = true;
+			}
+		});
+	}
+}
+
+function stationary_viewer_origins()
+{
+	const eye = {x: k_viewer_distance, y: 0, z: k_eye_height};
+	const left = {x: eye.x, y: -k_shoulder_offset, z: eye.z};
+	const right = {x: eye.x, y: k_shoulder_offset, z: eye.z};
+	const up = {x: eye.x, y: eye.y, z: eye.z + k_vertical_origin_offset};
+	return [eye, eye, left, right, left, right, up, up];
+}
+
+function draw_runtime_rays()
+{
+	clear_group(ray_group);
+	clear_group(origin_group);
+	ray_count = 0;
+	if (!viewer_model)
 	{
 		return;
 	}
-	const opacity = read_number("model-opacity");
-	model.traverse((node) =>
+
+	const targets = [
+		...generated_aabb_points().map(source_to_three),
+		...points.map((point) => source_to_three(point_vec(point)))
+	];
+	const muzzle_offset = k_weapon_muzzle_offsets[active_weapon_key];
+	if (weapon_model && muzzle_offset)
 	{
-		if (!node.isMesh)
+		weapon_model.updateWorldMatrix(true, true);
+		targets.push(weapon_model.localToWorld(source_to_three(muzzle_offset).clone()));
+	}
+
+	const origins = stationary_viewer_origins();
+	ray_count = origins.length * targets.length;
+	const vertices = [];
+	for (const origin of origins)
+	{
+		const start = source_to_three(origin);
+		for (const target of targets)
 		{
-			return;
+			vertices.push(start, target);
 		}
-		const materials = Array.isArray(node.material) ? node.material : [node.material];
-		for (const material of materials)
-		{
-			material.transparent = opacity < 1;
-			material.opacity = opacity;
-			material.depthWrite = opacity >= 1;
-			material.needsUpdate = true;
-		}
-	});
+	}
+	const geometry = new THREE.BufferGeometry().setFromPoints(vertices);
+	const material = new THREE.LineBasicMaterial({color: k_ray_color, transparent: true, opacity: 0.18, depthTest: false});
+	const lines = new THREE.LineSegments(geometry, material);
+	lines.renderOrder = 4;
+	ray_group.add(lines);
+
+	for (const origin of origins)
+	{
+		origin_group.add(make_marker(origin, k_origin_color, k_aabb_dot_radius));
+	}
 }
 
 function make_marker(point, color, radius)
@@ -258,6 +330,7 @@ function draw_points()
 		transform.detach();
 	}
 	draw_muzzle_point();
+	draw_runtime_rays();
 }
 
 function render_point_list()
@@ -312,6 +385,7 @@ function update_status()
 {
 	$("status-body-count").textContent = points.length;
 	$("status-aabb-count").textContent = generated_aabb_points().length;
+	$("status-ray-count").textContent = ray_count;
 	$("status-muzzle").textContent = weapon_model ? active_weapon_key : "None";
 	$("status-selected").textContent = points[selected_index]?.name ?? "None";
 	$("status").textContent = status_extra || (model ? "Studio ready." : "Load a local SAS model to begin.");
@@ -359,22 +433,22 @@ function set_points(next_points)
 	update_scene();
 }
 
-function apply_tools_preview(gltf)
+function apply_tools_preview(gltf, root)
 {
 	const clip = THREE.AnimationClip.findByName(gltf.animations || [], "tools_preview");
 	if (!clip)
 	{
 		return false;
 	}
-	const mixer = new THREE.AnimationMixer(model);
+	const mixer = new THREE.AnimationMixer(root);
 	mixer.clipAction(clip).play();
 	mixer.setTime(0);
 	return true;
 }
 
-function apply_readable_materials()
+function apply_readable_materials(root)
 {
-	model.traverse((node) =>
+	root.traverse((node) =>
 	{
 		if (!node.isMesh)
 		{
@@ -422,6 +496,7 @@ function update_weapon_transform()
 	const scale = Math.max(0.01, read_number("weapon-scale"));
 	weapon_model.scale.setScalar(scale);
 	draw_muzzle_point();
+	draw_runtime_rays();
 }
 
 function apply_weapon_grip(key)
@@ -450,6 +525,7 @@ async function load_weapon(key)
 	{
 		status_extra = model ? "Weapon preview cleared." : "No local SAS model loaded.";
 		draw_muzzle_point();
+		draw_runtime_rays();
 		update_status();
 		return;
 	}
@@ -492,7 +568,7 @@ async function load_model_from_url(url)
 {
 	return new Promise((resolve, reject) =>
 	{
-		loader.load(url, (gltf) =>
+		loader.load(url, async (gltf) =>
 		{
 			if (model)
 			{
@@ -501,9 +577,35 @@ async function load_model_from_url(url)
 			}
 			model = gltf.scene;
 			model.rotation.set(0, 0, 0);
-			apply_readable_materials();
+			apply_readable_materials(model);
 			scene.add(model);
-			const posed = apply_tools_preview(gltf);
+			const posed = apply_tools_preview(gltf, model);
+			if (viewer_model)
+			{
+				scene.remove(viewer_model);
+				viewer_model = null;
+			}
+			try
+			{
+				await new Promise((viewer_resolve, viewer_reject) =>
+				{
+					loader.load(url, (viewer_gltf) =>
+					{
+						viewer_model = viewer_gltf.scene;
+						apply_readable_materials(viewer_model);
+						apply_tools_preview(viewer_gltf, viewer_model);
+						viewer_model.position.copy(source_to_three({x: k_viewer_distance, y: 0, z: 0}));
+						viewer_model.rotation.set(0, Math.PI, 0);
+						scene.add(viewer_model);
+						viewer_resolve();
+					}, undefined, viewer_reject);
+				});
+			}
+			catch (error)
+			{
+				reject(error);
+				return;
+			}
 			set_model_opacity();
 			model_status = "Model loaded";
 			status_extra = `SAS loaded: ${url}${posed ? " (tools_preview pose)" : ""}`;
@@ -778,6 +880,11 @@ function run_self_checks()
 	};
 	expect(default_points.length === 15, "default body point count");
 	expect(generated_aabb_points().length === 8, "AABB fallback count");
+	expect(generated_aabb_points()[0].x === -24 && generated_aabb_points()[7].z === 80, "runtime AABB padding");
+	const viewer_origins = stationary_viewer_origins();
+	expect(viewer_origins.length === 8 && viewer_origins[0].x === 256, "fixed viewer origins");
+	expect(new Set(viewer_origins.map((point) => `${point.x},${point.y},${point.z}`)).size === 4, "stationary origin overlap");
+	expect(viewer_origins.length * (default_points.length + generated_aabb_points().length) === 184, "stationary ray count");
 	const roundtrip = JSON.parse(export_json());
 	const imported = validated_points(roundtrip, "self-check round trip");
 	expect(roundtrip.points.length === points.length, "JSON round trip count");
@@ -833,10 +940,10 @@ function init_scene()
 	scene = new THREE.Scene();
 	scene.background = new THREE.Color(0xeff1f1);
 	camera = new THREE.PerspectiveCamera(58, window.innerWidth / window.innerHeight, 0.02, 3000);
-	camera.position.set(4.2, 3.0, 6.2);
+	camera.position.set(8.5, 4.5, 10.5);
 
 	orbit = new OrbitControls(camera, renderer.domElement);
-	orbit.target.set(0, 1.0, 0);
+	orbit.target.set(0, 1.0, 3.25);
 	orbit.update();
 
 	transform = new TransformControls(camera, renderer.domElement);
@@ -853,6 +960,7 @@ function init_scene()
 		points[selected_index].x = value.x;
 		points[selected_index].y = value.y;
 		points[selected_index].z = value.z;
+		draw_runtime_rays();
 		render_point_editor();
 		update_status();
 	});
@@ -862,9 +970,11 @@ function init_scene()
 	marker_group = new THREE.Group();
 	aabb_group = new THREE.Group();
 	muzzle_group = new THREE.Group();
-	scene.add(aabb_group, marker_group, muzzle_group);
+	ray_group = new THREE.Group();
+	origin_group = new THREE.Group();
+	scene.add(ray_group, origin_group, aabb_group, marker_group, muzzle_group);
 	scene.add(new THREE.HemisphereLight(0xffffff, 0xc7cbd0, 3.0));
-	scene.add(new THREE.GridHelper(4, 8, 0x9ca2a7, 0xd5d8da));
+	scene.add(new THREE.GridHelper(10, 20, 0x9ca2a7, 0xd5d8da));
 
 	window.addEventListener("resize", () =>
 	{

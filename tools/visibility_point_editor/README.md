@@ -9,8 +9,9 @@ The editor shows:
 - 8 generated axis-aligned bounding box (AABB) fallback points
 - 15 editable body LOS points
 - one dynamic weapon muzzle point when a weapon is selected
+- a second SAS model fixed 256 units away, casting the stationary runtime rays toward the editable target samples
 
-It does not load maps, bounding volume hierarchy (BVH8) files, rays, hit triangles, or runtime worker state. Valve model exports are local assets and must not be committed.
+It does not load maps, bounding volume hierarchy (BVH8) files, hit triangles, or runtime worker state. The displayed rays are the fixed two-player stationary layout; Valve model exports are local assets and must not be committed.
 
 ## Export Local Assets
 
