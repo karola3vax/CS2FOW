@@ -7,8 +7,10 @@
 #include "builder.h"
 #include "glb_import.h"
 #include "map_source.h"
+#include "pvs.h"
 #include "subprocess.h"
 #include "vpk.h"
+#include "vvis_import.h"
 
 #include <atomic>
 #include <cassert>
@@ -564,6 +566,121 @@ void test_bvh(const std::filesystem::path &directory)
 	assert(!load_bvh8(path, loaded, error));
 }
 
+// TODO: remove once we have the pvs builder
+void fill_valid_pvs(pvs_data &data)
+{
+	data = {};
+	std::strcpy(data.header.map_name, "de_test");
+	data.header.flags = k_bvh8_flag_nested_map_vpk;
+	data.header.source_crc32 = 0x11111111u;
+	data.header.source_size = 0x22222222u;
+	data.header.vvis_crc32 = 0x33333333u;
+	data.header.vvis_size = 0x44444444u;
+	data.header.base_cluster_count = 2;
+	data.header.pvs_bytes_per_cluster = 1;
+	for (int axis = 0; axis < 3; ++axis)
+	{
+		data.header.world_min[axis] = -64.0f;
+		data.header.world_max[axis] = 64.0f;
+	}
+	data.header.grid_size = 64.0f;
+	data.nodes = {0x0ull, 0x1ull, 0x2ull};
+	data.regions = {0xaaull, 0xbbull};
+	data.masks = {0xccull};
+	data.vis = {0x01u, 0x02u};
+}
+
+void test_pvs(const std::filesystem::path &directory)
+{
+	pvs_data data;
+	fill_valid_pvs(data);
+	std::string error;
+	const std::filesystem::path path = directory / "test.pvs";
+	assert(write_pvs(path, data, error));
+
+	pvs_data loaded;
+	assert(load_pvs(path, loaded, error));
+	assert(loaded.header.version == k_pvs_version && loaded.header.header_size == sizeof(pvs_header));
+	assert(std::strcmp(loaded.header.map_name, "de_test") == 0);
+	assert(loaded.header.flags == k_bvh8_flag_nested_map_vpk);
+	assert(loaded.header.source_crc32 == data.header.source_crc32 && loaded.header.source_size == data.header.source_size);
+	assert(loaded.header.vvis_crc32 == data.header.vvis_crc32 && loaded.header.vvis_size == data.header.vvis_size);
+	assert(loaded.header.base_cluster_count == 2 && loaded.header.pvs_bytes_per_cluster == 1);
+	assert(loaded.header.grid_size == data.header.grid_size);
+	assert(loaded.header.world_min[0] == data.header.world_min[0] && loaded.header.world_max[2] == data.header.world_max[2]);
+	assert(loaded.nodes == data.nodes && loaded.regions == data.regions);
+	assert(loaded.masks == data.masks && loaded.vis == data.vis);
+	assert(validate_pvs(loaded, error));
+
+	pvs_data mismatched = loaded;
+	mismatched.nodes.emplace_back();
+	assert(!validate_pvs(mismatched, error));
+	assert(error == "PVS header does not match payload");
+
+	data.vis[0] = 0x7fu;
+	assert(write_pvs(path, data, error));
+	assert(load_pvs(path, loaded, error) && loaded.vis[0] == 0x7fu);
+
+	const auto rejected_header = [&](const char *expected, const auto &change)
+	{
+		assert(write_pvs(path, data, error));
+		std::fstream stream(path, std::ios::binary | std::ios::in | std::ios::out);
+		pvs_header header {};
+		stream.read(reinterpret_cast<char *>(&header), sizeof(header));
+		change(header);
+		stream.seekp(0);
+		stream.write(reinterpret_cast<const char *>(&header), sizeof(header));
+		stream.close();
+		pvs_data rejected;
+		assert(!load_pvs(path, rejected, error));
+		assert(error == expected);
+	};
+	rejected_header("invalid PVS magic or version", [](pvs_header &header) { header.magic[0] = 'X'; });
+	rejected_header("invalid PVS magic or version", [](pvs_header &header) { header.version = k_pvs_version + 1u; });
+	rejected_header("invalid PVS magic or version", [](pvs_header &header) { header.header_size = 128u; });
+	rejected_header("PVS contains unsupported flags", [](pvs_header &header) { header.flags = 0x80000000u; });
+	rejected_header("PVS reserved header bytes are not zero", [](pvs_header &header) { header.reserved[0] = 1u; });
+	rejected_header("invalid PVS map name", [](pvs_header &header) { header.map_name[0] = '\0'; });
+	rejected_header("invalid PVS counts", [](pvs_header &header) { header.base_cluster_count = 0u; });
+	rejected_header("invalid PVS counts", [](pvs_header &header) { header.pvs_bytes_per_cluster = 0u; });
+	rejected_header("invalid PVS counts", [](pvs_header &header) { header.node_count = 0u; });
+	rejected_header("invalid PVS world bounds", [](pvs_header &header) { header.world_min[0] = std::numeric_limits<float>::quiet_NaN(); });
+	rejected_header("invalid PVS world bounds", [](pvs_header &header) { header.grid_size = 0.0f; });
+	rejected_header("invalid PVS world bounds", [](pvs_header &header) { header.world_min[0] = 1.0e9f; });
+	rejected_header("PVS offsets or file size are invalid", [](pvs_header &header) { header.vis_offset += 32u; });
+	rejected_header("PVS offsets or file size are invalid", [](pvs_header &header) { header.file_size += 8u; });
+	rejected_header("PVS offsets or file size are invalid", [](pvs_header &header) { header.node_count = std::numeric_limits<uint32_t>::max(); });
+	rejected_header("PVS payload CRC mismatch", [](pvs_header &header) { header.payload_crc32 ^= 0x5au; });
+
+	assert(write_pvs(path, data, error));
+	std::filesystem::resize_file(path, 100);
+	pvs_data truncated;
+	assert(!load_pvs(path, truncated, error) && error == "PVS file is truncated");
+	assert(write_pvs(path, data, error));
+	std::filesystem::resize_file(path, sizeof(pvs_header) + 8u);
+	assert(!load_pvs(path, truncated, error) && error == "PVS offsets or file size are invalid");
+
+	assert(write_pvs(path, data, error));
+	std::fstream corrupt(path, std::ios::binary | std::ios::in | std::ios::out);
+	corrupt.seekp(sizeof(pvs_header) + 10);
+	char byte = 0;
+	corrupt.read(&byte, 1);
+	byte ^= 0x5a;
+	corrupt.seekp(sizeof(pvs_header) + 10);
+	corrupt.write(&byte, 1);
+	corrupt.close();
+	pvs_data corrupted;
+	assert(!load_pvs(path, corrupted, error) && error == "PVS payload CRC mismatch");
+
+	assert(write_pvs(path, data, error));
+	pvs_data invalid = data;
+	invalid.header.flags = 0x80000000u;
+	assert(!write_pvs(path, invalid, error));
+	pvs_data reloaded;
+	assert(load_pvs(path, reloaded, error));
+	assert(reloaded.nodes == data.nodes && reloaded.vis == data.vis);
+}
+
 } // namespace
 
 void run_map_and_bvh_tests(const std::filesystem::path &directory, const std::filesystem::path &test_executable)
@@ -573,4 +690,5 @@ void run_map_and_bvh_tests(const std::filesystem::path &directory, const std::fi
 	test_subprocess(directory, test_executable);
 	test_glb(directory);
 	test_bvh(directory);
+	test_pvs(directory);
 }

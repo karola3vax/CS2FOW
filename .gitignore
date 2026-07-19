@@ -17,3 +17,6 @@
 *.pdb
 *.ilk
 *.pyc
+
+/notes
+compile_flags.txt
