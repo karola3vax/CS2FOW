@@ -4,7 +4,7 @@
 
 ### Server-side anti-wallhack for Counter-Strike 2 community servers
 
-[![Version](https://img.shields.io/github/v/release/karola3vax/CS2FOW?style=for-the-badge&label=version)](https://github.com/karola3vax/CS2FOW/releases/latest) [![Downloads](https://img.shields.io/github/downloads/karola3vax/CS2FOW/total?style=for-the-badge&label=downloads)](https://github.com/karola3vax/CS2FOW/releases) [![Issues](https://img.shields.io/github/issues/karola3vax/CS2FOW?style=for-the-badge&label=issues)](https://github.com/karola3vax/CS2FOW/issues) [![License](https://img.shields.io/github/license/karola3vax/CS2FOW?style=for-the-badge&label=license)](LICENSE)
+[![Release](https://img.shields.io/badge/release-0.2.4--preview-blue?style=for-the-badge)](https://gitlab.com/karola3vax-group/cs2fow/-/releases/v0.2.4-preview) [![Issues](https://img.shields.io/badge/issues-GitLab-fc6d26?style=for-the-badge)](https://gitlab.com/karola3vax-group/cs2fow/-/issues) [![License](https://img.shields.io/badge/license-MIT-green?style=for-the-badge)](LICENSE)
 
 <img src="docs/ancient.gif" width="800" alt="CS2FOW hiding players behind solid map geometry on Ancient">
 
@@ -149,7 +149,7 @@ It means CS2FOW would rather show too much than hide the wrong player. If someth
 ## Quickstart
 
 1. Install [Metamod:Source](https://www.sourcemm.net/) on your CS2 server.
-2. Grab the Windows or Linux `0.2.4-preview` core ZIP from the [releases page](https://github.com/karola3vax/CS2FOW/releases).
+2. Grab the Windows or Linux `0.2.4-preview` core ZIP from the [releases page](https://gitlab.com/karola3vax-group/cs2fow/-/releases).
 3. Extract it into your server's `game/csgo` folder. Do not rearrange the folders inside the ZIP.
 4. Start your server and load a map.
 5. Type `cs2fow_status` in the server console.
@@ -158,15 +158,7 @@ The first time you load a map, `cs2fow_status` may say that an automatic bake is
 
 ### Official map releases
 
-Official map data also has its own independent [`maps-v*` release stream](https://github.com/karola3vax/CS2FOW/releases/tag/maps-v1). Every maps tag is permanent, so hosting providers and leagues can safely pin one exact ZIP and checksum without following plugin releases or running the baker.
-
-```sh
-# Find and download the newest maps-only release with GitHub CLI.
-tag="$(gh release list --repo karola3vax/CS2FOW --limit 100 --json tagName --jq '.[].tagName' | grep '^maps-v' | head -n1)"
-gh release download "$tag" --repo karola3vax/CS2FOW --pattern 'cs2fow-official-maps-*.zip' --pattern 'maps-*-SHA256SUMS.txt' --pattern 'maps-*-manifest.json'
-```
-
-Normal CS2FOW releases still include the same official-map package for simple manual installs. The maps-only version changes only when Valve changes a covered map, the covered map list changes, or CS2FOW changes its bake recipe or BVH8 format.
+The current GitLab release includes the [official-map ZIP](https://gitlab.com/karola3vax-group/cs2fow/-/releases/v0.2.4-preview/downloads/cs2fow-0.2.4-preview-official-maps.zip), [checksums](https://gitlab.com/karola3vax-group/cs2fow/-/releases/v0.2.4-preview/downloads/SHA256SUMS.txt), and [manifest](https://gitlab.com/karola3vax-group/cs2fow/-/releases/v0.2.4-preview/downloads/v0.2.4-preview-manifest.json). Permanent `maps-v*` tags remain in the repository history while the project is temporarily hosted on GitLab.
 
 Your server needs an x86-64 CPU with AVX visible to the operating system. CS2FOW also checks that its private engine offsets, called gamedata, match the loaded CS2 server file by size and CRC32. If Valve ships an unknown update, CS2FOW stays off until matching gamedata is installed. That is much safer than guessing inside server memory.
 
@@ -286,8 +278,8 @@ When the automatic baker or VRF fails, the error includes the newest 8 KiB of th
 
 ## Developer and project links
 
-- [Releases](https://github.com/karola3vax/CS2FOW/releases): download the Windows, Linux, and official-map packages.
-- [Official map releases](https://github.com/karola3vax/CS2FOW/releases/tag/maps-v1): pin verified map data through the independent `maps-v*` stream.
+- [Releases](https://gitlab.com/karola3vax-group/cs2fow/-/releases): download the Windows, Linux, and official-map packages.
+- [Official map package](https://gitlab.com/karola3vax-group/cs2fow/-/releases/v0.2.4-preview/downloads/cs2fow-0.2.4-preview-official-maps.zip): download the verified map data from the current release.
 - [Code tour](docs/CODE_TOUR.md): follow the architecture, threads, safety rules, and build and release steps in plain language.
 - [Visibility Studio](tools/visibility_point_editor/README.md): see and tune the body, box, and muzzle points used for sight checks.
 - [CS2FOW Map Baker](https://cs2fow-bake-service.onrender.com/): prepare visibility data from a public Workshop map.
