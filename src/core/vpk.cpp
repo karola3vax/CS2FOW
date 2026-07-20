@@ -119,8 +119,10 @@ bool read_header(std::ifstream &stream, vpk_header_info &info, std::string &erro
 bool read_string(std::ifstream &stream, uint64_t tree_end, std::string &value)
 {
 	value.clear();
-	while (stream.tellg() >= 0 && static_cast<uint64_t>(stream.tellg()) < tree_end)
+	for (;;)
 	{
+		const std::streampos position = stream.tellg();
+		if (position < 0 || static_cast<uint64_t>(position) >= tree_end) return false;
 		char character = '\0';
 		if (!stream.get(character))
 		{
@@ -136,7 +138,6 @@ bool read_string(std::ifstream &stream, uint64_t tree_end, std::string &value)
 		}
 		value.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(character))));
 	}
-	return false;
 }
 
 std::string normalized(std::string value)
@@ -317,14 +318,10 @@ bool list_vpk_entries(const std::filesystem::path &vpk_path, std::vector<vpk_ent
 	return true;
 }
 
-bool find_vpk_entry(const std::filesystem::path &vpk_path, const std::string &entry_path, vpk_entry &entry, std::string &error)
+bool find_vpk_entry(std::span<const vpk_entry> entries, std::string_view entry_path,
+	vpk_entry &entry, std::string &error)
 {
-	std::vector<vpk_entry> entries;
-	if (!list_vpk_entries(vpk_path, entries, error))
-	{
-		return false;
-	}
-	const std::string wanted = normalized(entry_path);
+	const std::string wanted = normalized(std::string(entry_path));
 	const auto found = std::find_if(entries.begin(), entries.end(), [&](const vpk_entry &candidate)
 	{
 		return candidate.path == wanted;
@@ -336,6 +333,13 @@ bool find_vpk_entry(const std::filesystem::path &vpk_path, const std::string &en
 	}
 	entry = *found;
 	return true;
+}
+
+bool find_vpk_entry(const std::filesystem::path &vpk_path, const std::string &entry_path, vpk_entry &entry, std::string &error)
+{
+	std::vector<vpk_entry> entries;
+	return list_vpk_entries(vpk_path, entries, error)
+		&& find_vpk_entry(std::span<const vpk_entry>(entries), entry_path, entry, error);
 }
 
 bool extract_vpk_entry(const std::filesystem::path &vpk_path, const vpk_entry &entry,
@@ -383,7 +387,8 @@ bool extract_vpk_entry(const std::filesystem::path &vpk_path, const vpk_entry &e
 			return false;
 		}
 	}
-	const std::filesystem::path temporary = output.string() + ".tmp";
+	std::filesystem::path temporary = output;
+	temporary += ".tmp";
 	std::ifstream directory_stream(vpk_path, std::ios::binary);
 	std::ifstream archive_stream;
 	if (entry.archive_size != 0) archive_stream.open(archive, std::ios::binary);

@@ -412,17 +412,19 @@ bool plugin::collect_player_visual_group(CGameEntitySystem *system, CEntityInsta
 	return group.count != 0;
 }
 
-bool plugin::capture_animated_body_points(CEntityInstance *pawn, uint32_t slot, player_state &player)
+bool plugin::capture_animated_body_points(CEntityInstance *pawn, uint32_t slot, player_state &player,
+	std::chrono::steady_clock::time_point now)
 {
 	if (pawn == nullptr || slot >= player_bone_cache_.size() || lookup_bone_ == nullptr || get_bone_transform_ == nullptr)
 	{
 		return false;
 	}
 	player_bone_cache &cache = player_bone_cache_[slot];
-	if (cache.pawn != pawn)
+	if (cache.pawn != pawn || (!cache.valid && now >= cache.retry_after))
 	{
 		cache = {};
 		cache.pawn = pawn;
+		cache.retry_after = now + std::chrono::seconds(1);
 		cache.valid = true;
 		const auto lookup = reinterpret_cast<int32_t (*)(void *, const char *)>(lookup_bone_);
 		for (size_t point = 0; point < cache.indices.size(); ++point)
@@ -486,19 +488,21 @@ bool plugin::capture(visibility_snapshot &value, float game_time)
 	std::array<lifecycle_key, k_max_players> keys;
 	std::array<bool, k_max_players> stable_slots {};
 	std::array<CEntityInstance *, k_max_players> animated_pawns {};
-	std::array<CEntityInstance *, k_max_smoke_volumes> smoke_entities {};
-	size_t smoke_count = 0;
-	bool smoke_overflow = false;
-	collect_smoke_entities(system, smoke_entities, smoke_count, smoke_overflow);
 	value.filter_teammates = visibility_teammate_filter_enabled(
 		cs2fow_filter_teammates.Get(), teammates_are_enemies());
 	value.smoke_enabled = cs2fow_smoke_occlusion.Get();
 	value.smoke_available = smoke_schema_available_ && smoke_gamedata_available_;
-	if (value.smoke_enabled && value.smoke_available
-		&& !capture_smokes(smoke_entities, smoke_count, smoke_overflow, game_time, value))
+	if (value.smoke_enabled && value.smoke_available)
 	{
-		value.smoke_available = false;
-		value.smokes.reset();
+		std::array<CEntityInstance *, k_max_smoke_volumes> smoke_entities {};
+		size_t smoke_count = 0;
+		bool smoke_overflow = false;
+		collect_smoke_entities(system, smoke_entities, smoke_count, smoke_overflow);
+		if (!capture_smokes(smoke_entities, smoke_count, smoke_overflow, game_time, value))
+		{
+			value.smoke_available = false;
+			value.smokes.reset();
+		}
 	}
 	std::unique_lock<std::mutex> lock(transmit_state_mutex_);
 	for (uint32_t slot = 0; slot < k_max_players; ++slot)
@@ -559,7 +563,7 @@ bool plugin::capture(visibility_snapshot &value, float game_time)
 			player_bone_cache_[slot] = {};
 			continue;
 		}
-		capture_animated_body_points(animated_pawns[slot], slot, value.players[slot])
+		capture_animated_body_points(animated_pawns[slot], slot, value.players[slot], now)
 			? ++animated_players : ++static_fallback_players;
 	}
 	bone_timing_.record(std::chrono::duration<double, std::milli>(

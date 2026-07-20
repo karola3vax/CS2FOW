@@ -41,20 +41,9 @@ void append_output_tail(std::string &tail, const char *data, size_t size)
 }
 
 #if defined(_WIN32)
-std::wstring widen(const std::string &value)
-{
-	if (value.empty())
-	{
-		return {};
-	}
-	const int size = MultiByteToWideChar(CP_UTF8, 0, value.data(), static_cast<int>(value.size()), nullptr, 0);
-	std::wstring result(static_cast<size_t>(size), L'\0');
-	MultiByteToWideChar(CP_UTF8, 0, value.data(), static_cast<int>(value.size()), result.data(), size);
-	return result;
-}
-
 std::wstring quote_argument(const std::wstring &value)
 {
+	if (value.empty()) return L"\"\"";
 	if (value.find_first_of(L" \t\"") == std::wstring::npos)
 	{
 		return value;
@@ -106,7 +95,7 @@ bool lower_process_priority(std::string &error)
 	return true;
 }
 
-bool run_process(const std::filesystem::path &executable, const std::vector<std::string> &arguments,
+bool run_process(const std::filesystem::path &executable, const std::vector<std::filesystem::path> &arguments,
 	std::chrono::milliseconds timeout, const std::atomic_bool *cancel, bool low_priority,
 	posix_process_group process_group, process_result &result, std::string &error)
 {
@@ -121,10 +110,10 @@ bool run_process(const std::filesystem::path &executable, const std::vector<std:
 #if defined(_WIN32)
 	const std::wstring executable_wide = executable.wstring();
 	std::wstring command = quote_argument(executable_wide);
-	for (const std::string &argument : arguments)
+	for (const std::filesystem::path &argument : arguments)
 	{
 		command.push_back(L' ');
-		command += quote_argument(widen(argument));
+		command += quote_argument(argument.native());
 	}
 	std::vector<wchar_t> mutable_command(command.begin(), command.end());
 	mutable_command.push_back(L'\0');
@@ -247,7 +236,7 @@ bool run_process(const std::filesystem::path &executable, const std::vector<std:
 	std::vector<std::string> values;
 	values.reserve(arguments.size() + 1u);
 	values.push_back(executable_string);
-	values.insert(values.end(), arguments.begin(), arguments.end());
+	for (const std::filesystem::path &argument : arguments) values.push_back(argument.native());
 	std::vector<char *> argv;
 	argv.reserve(values.size() + 1u);
 	for (std::string &value : values)
@@ -264,17 +253,36 @@ bool run_process(const std::filesystem::path &executable, const std::vector<std:
 		return false;
 	}
 	posix_spawn_file_actions_t file_actions;
-	posix_spawn_file_actions_init(&file_actions);
-	posix_spawn_file_actions_adddup2(&file_actions, output_pipe[1], STDOUT_FILENO);
-	posix_spawn_file_actions_adddup2(&file_actions, output_pipe[1], STDERR_FILENO);
-	posix_spawn_file_actions_addclose(&file_actions, output_pipe[0]);
-	posix_spawn_file_actions_addclose(&file_actions, output_pipe[1]);
+	int setup_error = posix_spawn_file_actions_init(&file_actions);
+	const bool file_actions_initialized = setup_error == 0;
+	if (setup_error == 0) setup_error = posix_spawn_file_actions_adddup2(&file_actions, output_pipe[1], STDOUT_FILENO);
+	if (setup_error == 0) setup_error = posix_spawn_file_actions_adddup2(&file_actions, output_pipe[1], STDERR_FILENO);
+	if (setup_error == 0) setup_error = posix_spawn_file_actions_addclose(&file_actions, output_pipe[0]);
+	if (setup_error == 0) setup_error = posix_spawn_file_actions_addclose(&file_actions, output_pipe[1]);
+	if (setup_error != 0)
+	{
+		if (file_actions_initialized) posix_spawn_file_actions_destroy(&file_actions);
+		close(output_pipe[0]);
+		close(output_pipe[1]);
+		error = std::string("could not configure process output: ") + std::strerror(setup_error);
+		return false;
+	}
 	posix_spawnattr_t attributes;
-	posix_spawnattr_init(&attributes);
+	setup_error = posix_spawnattr_init(&attributes);
+	const bool attributes_initialized = setup_error == 0;
 	if (process_group == posix_process_group::isolated)
 	{
-		posix_spawnattr_setflags(&attributes, POSIX_SPAWN_SETPGROUP);
-		posix_spawnattr_setpgroup(&attributes, 0);
+		if (setup_error == 0) setup_error = posix_spawnattr_setflags(&attributes, POSIX_SPAWN_SETPGROUP);
+		if (setup_error == 0) setup_error = posix_spawnattr_setpgroup(&attributes, 0);
+	}
+	if (setup_error != 0)
+	{
+		posix_spawn_file_actions_destroy(&file_actions);
+		if (attributes_initialized) posix_spawnattr_destroy(&attributes);
+		close(output_pipe[0]);
+		close(output_pipe[1]);
+		error = std::string("could not configure process attributes: ") + std::strerror(setup_error);
+		return false;
 	}
 	pid_t pid = 0;
 	const int spawn_error = posix_spawn(&pid, executable_string.c_str(), &file_actions, &attributes, argv.data(), environ);

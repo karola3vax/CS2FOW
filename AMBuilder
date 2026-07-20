@@ -16,11 +16,11 @@ def configure(compiler, plugin=False):
   os.path.join(root, 'third_party', 'generated'),
   ]
   if compiler.behavior == 'msvc':
-    compiler.cflags += ['/W4', '/std:c++20', '/arch:AVX', '/EHsc', '/permissive-']
+    compiler.cflags += ['/W4', '/std:c++20', '/EHsc', '/permissive-']
     compiler.cflags += ['/MTd'] if builder.options.debug else ['/MT']
     compiler.defines += ['_CRT_SECURE_NO_WARNINGS', 'NOMINMAX']
   else:
-    compiler.cflags += ['-Wall', '-Wextra', '-Wpedantic', '-mavx', '-pthread']
+    compiler.cflags += ['-Wall', '-Wextra', '-Wpedantic', '-pthread']
     compiler.linkflags += ['-pthread']
     compiler.cxxflags += ['-std=c++20']
     if plugin:

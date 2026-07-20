@@ -22,12 +22,18 @@ namespace
 
 constexpr float k_ray_epsilon = 1.0e-5f;
 
+#if defined(__GNUC__) && !defined(_MSC_VER)
+#define CS2FOW_AVX __attribute__((target("avx")))
+#else
+#define CS2FOW_AVX
+#endif
+
 uint32_t packet_mask(uint32_t count)
 {
 	return count == 8 ? 0xffu : ((1u << count) - 1u);
 }
 
-uint32_t hit_packet(const triangle_packet8 &packet, uint32_t count, vec3 origin, vec3 direction)
+CS2FOW_AVX uint32_t hit_packet(const triangle_packet8 &packet, uint32_t count, vec3 origin, vec3 direction)
 {
 	const __m256 ox = _mm256_set1_ps(origin.x);
 	const __m256 oy = _mm256_set1_ps(origin.y);
@@ -70,7 +76,7 @@ uint32_t hit_packet(const triangle_packet8 &packet, uint32_t count, vec3 origin,
 	return static_cast<uint32_t>(_mm256_movemask_ps(valid)) & packet_mask(count);
 }
 
-uint32_t hit_children(const bvh8_node &node, vec3 origin, vec3 direction)
+CS2FOW_AVX uint32_t hit_children(const bvh8_node &node, vec3 origin, vec3 direction)
 {
 	__m256 near_t = _mm256_set1_ps(-std::numeric_limits<float>::infinity());
 	__m256 far_t = _mm256_set1_ps(std::numeric_limits<float>::infinity());
@@ -110,6 +116,8 @@ uint32_t hit_children(const bvh8_node &node, vec3 origin, vec3 direction)
 	}
 	return mask;
 }
+
+#undef CS2FOW_AVX
 
 } // namespace
 
