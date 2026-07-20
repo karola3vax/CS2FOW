@@ -5,10 +5,12 @@
 // lifecycle changes, or incomplete groups reset toward fail-open behavior.
 
 #include <inetchannelinfo.h>
+#include <mathlib/transform.h>
 #include <tier1/utlvector.h>
 
 #include <algorithm>
 #include <cstring>
+#include <limits>
 
 namespace cs2fow
 {
@@ -410,6 +412,67 @@ bool plugin::collect_player_visual_group(CGameEntitySystem *system, CEntityInsta
 	return group.count != 0;
 }
 
+bool plugin::capture_animated_body_points(CEntityInstance *pawn, uint32_t slot, player_state &player)
+{
+	if (pawn == nullptr || slot >= player_bone_cache_.size() || lookup_bone_ == nullptr || get_bone_transform_ == nullptr)
+	{
+		return false;
+	}
+	player_bone_cache &cache = player_bone_cache_[slot];
+	if (cache.pawn != pawn)
+	{
+		cache = {};
+		cache.pawn = pawn;
+		cache.valid = true;
+		const auto lookup = reinterpret_cast<int32_t (*)(void *, const char *)>(lookup_bone_);
+		for (size_t point = 0; point < cache.indices.size(); ++point)
+		{
+			cache.indices[point] = lookup(pawn, k_visibility_body_bindings[point].bone);
+			if (cache.indices[point] < 0)
+			{
+				cache.valid = false;
+			}
+		}
+	}
+	if (!cache.valid)
+	{
+		return false;
+	}
+
+	std::array<vec3, k_visibility_body_point_count> points;
+	constexpr float k_max_body_point_distance_sq = 128.0f * 128.0f;
+	for (size_t point = 0; point < points.size(); ++point)
+	{
+		CTransform transform;
+		const float invalid = std::numeric_limits<float>::quiet_NaN();
+		transform.m_vPosition.Init(invalid, invalid, invalid);
+		transform.m_orientation.Init(invalid, invalid, invalid, invalid);
+#if defined(_WIN32)
+		reinterpret_cast<void (*)(void *, CTransform *, int32_t)>(get_bone_transform_)(pawn, &transform, cache.indices[point]);
+#else
+		reinterpret_cast<void (*)(CTransform *, void *, int32_t)>(get_bone_transform_)(&transform, pawn, cache.indices[point]);
+#endif
+		const visibility_bone_transform copied {
+			to_vec3(transform.m_vPosition),
+			{transform.m_orientation.x, transform.m_orientation.y, transform.m_orientation.z, transform.m_orientation.w}
+		};
+		if (!visibility_transform_body_point(copied, k_visibility_body_bindings[point].local, points[point]))
+		{
+			return false;
+		}
+		const float x = points[point].x - player.origin.x;
+		const float y = points[point].y - player.origin.y;
+		const float z = points[point].z - player.origin.z;
+		if (x * x + y * y + z * z > k_max_body_point_distance_sq)
+		{
+			return false;
+		}
+	}
+	player.body_points = points;
+	player.body_point_count = static_cast<uint32_t>(points.size());
+	return true;
+}
+
 bool plugin::capture(visibility_snapshot &value, float game_time)
 {
 	CGameEntitySystem *system = entity_system();
@@ -422,6 +485,7 @@ bool plugin::capture(visibility_snapshot &value, float game_time)
 	const auto now = value.captured;
 	std::array<lifecycle_key, k_max_players> keys;
 	std::array<bool, k_max_players> stable_slots {};
+	std::array<CEntityInstance *, k_max_players> animated_pawns {};
 	std::array<CEntityInstance *, k_max_smoke_volumes> smoke_entities {};
 	size_t smoke_count = 0;
 	bool smoke_overflow = false;
@@ -483,7 +547,25 @@ bool plugin::capture(visibility_snapshot &value, float game_time)
 		player.rtt_seconds = std::max(0.0f, player.rtt_seconds);
 		player.valid = true;
 		value.players[slot] = player;
+		animated_pawns[slot] = pawn_entity;
 	}
+	const auto bones_started = std::chrono::steady_clock::now();
+	uint32_t animated_players = 0;
+	uint32_t static_fallback_players = 0;
+	for (uint32_t slot = 0; slot < k_max_players; ++slot)
+	{
+		if (!value.players[slot].valid)
+		{
+			player_bone_cache_[slot] = {};
+			continue;
+		}
+		capture_animated_body_points(animated_pawns[slot], slot, value.players[slot])
+			? ++animated_players : ++static_fallback_players;
+	}
+	bone_timing_.record(std::chrono::duration<double, std::milli>(
+		std::chrono::steady_clock::now() - bones_started).count());
+	animated_players_ = animated_players;
+	static_fallback_players_ = static_fallback_players;
 	for (uint32_t recipient = 0; recipient < k_max_players; ++recipient)
 	{
 		for (uint32_t target = 0; target < k_max_players; ++target)

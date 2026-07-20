@@ -78,7 +78,7 @@ worker_stats visibility_worker::stats() const
 visibility_player visibility_worker::sample_player(const player_state &player)
 {
 	return {player.eye, player.origin, player.mins, player.maxs, player.eye_yaw_degrees, player.rtt_seconds,
-		player.movement_buttons, player.muzzle_class};
+		player.movement_buttons, player.muzzle_class, player.body_points, player.body_point_count};
 }
 
 void visibility_worker::run()

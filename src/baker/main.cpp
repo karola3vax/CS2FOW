@@ -10,11 +10,15 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
 #include <iostream>
 #include <sstream>
+#include <span>
+#include <unordered_map>
+#include <vector>
 
 namespace cs2fow
 {
@@ -29,6 +33,7 @@ struct arguments
 	std::filesystem::path vrf;
 	std::filesystem::path vpk;
 	std::filesystem::path debug_obj;
+	std::filesystem::path studio_surfaces;
 	std::filesystem::path inspect_bvh8;
 	bool low_priority {};
 	bool list_maps {};
@@ -65,7 +70,7 @@ bool parse_arguments(int argc, char **argv, arguments &result)
 		{
 			result.inspect_bvh8 = argv[++i];
 		}
-		else if ((option == "--game" || option == "--map" || option == "--output" || option == "--vrf" || option == "--vpk" || option == "--debug-obj") && i + 1 < argc)
+		else if ((option == "--game" || option == "--map" || option == "--output" || option == "--vrf" || option == "--vpk" || option == "--debug-obj" || option == "--studio-surfaces") && i + 1 < argc)
 		{
 			const std::string value = argv[++i];
 			if (option == "--game") result.game = value;
@@ -73,7 +78,8 @@ bool parse_arguments(int argc, char **argv, arguments &result)
 			else if (option == "--output") result.output = value;
 			else if (option == "--vrf") result.vrf = value;
 			else if (option == "--vpk") result.vpk = value;
-			else result.debug_obj = value;
+			else if (option == "--debug-obj") result.debug_obj = value;
+			else result.studio_surfaces = value;
 		}
 		else
 		{
@@ -83,7 +89,7 @@ bool parse_arguments(int argc, char **argv, arguments &result)
 	if (!result.inspect_bvh8.empty())
 	{
 		return !result.list_maps && result.game.empty() && result.map.empty() && result.output.empty()
-			&& result.vrf.empty() && result.vpk.empty() && result.debug_obj.empty() && !result.low_priority;
+			&& result.vrf.empty() && result.vpk.empty() && result.debug_obj.empty() && result.studio_surfaces.empty() && !result.low_priority;
 	}
 	if (result.list_maps)
 	{
@@ -96,6 +102,106 @@ bool parse_arguments(int argc, char **argv, arguments &result)
 	if (result.output.empty())
 	{
 		result.output = result.map + ".bvh8";
+	}
+	return true;
+}
+
+void append_u16(std::vector<std::byte> &bytes, uint16_t value)
+{
+	bytes.push_back(static_cast<std::byte>(value & 0xffu));
+	bytes.push_back(static_cast<std::byte>((value >> 8u) & 0xffu));
+}
+
+void write_u32(std::vector<std::byte> &bytes, size_t offset, uint32_t value)
+{
+	for (uint32_t i = 0; i < 4; ++i) bytes[offset + i] = static_cast<std::byte>((value >> (i * 8u)) & 0xffu);
+}
+
+void write_u64(std::vector<std::byte> &bytes, size_t offset, uint64_t value)
+{
+	for (uint32_t i = 0; i < 8; ++i) bytes[offset + i] = static_cast<std::byte>((value >> (i * 8u)) & 0xffu);
+}
+
+bool write_surface_sidecar(const std::filesystem::path &path, const std::string &map, const bvh8_data &data,
+	std::span<const std::string> triangle_surfaces, std::span<const uint32_t> packet_sources, std::string &error)
+{
+	constexpr size_t header_size = 128;
+	if (packet_sources.size() != data.packets.size() * 8u || triangle_surfaces.size() != data.header.triangle_count)
+	{
+		error = "Studio surface data does not match the baked triangles";
+		return false;
+	}
+	std::vector<std::string> names;
+	std::unordered_map<std::string, uint16_t> ids;
+	std::vector<uint16_t> lanes;
+	lanes.reserve(packet_sources.size());
+	for (const uint32_t source : packet_sources)
+	{
+		if (source == k_invalid_ref)
+		{
+			lanes.push_back(UINT16_MAX);
+			continue;
+		}
+		if (source >= triangle_surfaces.size())
+		{
+			error = "Studio surface source index is invalid";
+			return false;
+		}
+		const std::string &name = triangle_surfaces[source];
+		auto [it, inserted] = ids.try_emplace(name, static_cast<uint16_t>(names.size()));
+		if (inserted)
+		{
+			if (names.size() >= UINT16_MAX || name.size() > UINT16_MAX)
+			{
+				error = "Studio surface table is too large";
+				return false;
+			}
+			names.push_back(name);
+		}
+		lanes.push_back(it->second);
+	}
+	std::vector<std::byte> bytes(header_size);
+	const char magic[8] {'C', 'S', '2', 'S', 'U', 'R', 'F', '\0'};
+	std::memcpy(bytes.data(), magic, sizeof(magic));
+	write_u32(bytes, 8, 1u);
+	write_u32(bytes, 12, static_cast<uint32_t>(header_size));
+	write_u32(bytes, 16, data.header.payload_crc32);
+	write_u32(bytes, 20, static_cast<uint32_t>(data.packets.size()));
+	write_u32(bytes, 24, data.header.triangle_count);
+	write_u32(bytes, 28, static_cast<uint32_t>(names.size()));
+	std::memcpy(bytes.data() + 36, map.data(), std::min<size_t>(map.size(), 63u));
+	const uint64_t strings_offset = bytes.size();
+	for (const std::string &name : names)
+	{
+		append_u16(bytes, static_cast<uint16_t>(name.size()));
+		for (const char value : name) bytes.push_back(static_cast<std::byte>(static_cast<unsigned char>(value)));
+	}
+	const uint64_t lanes_offset = bytes.size();
+	for (const uint16_t lane : lanes) append_u16(bytes, lane);
+	write_u32(bytes, 32, crc32(std::span<const std::byte>(bytes).subspan(header_size)));
+	write_u64(bytes, 100, strings_offset);
+	write_u64(bytes, 108, lanes_offset);
+	write_u64(bytes, 116, bytes.size());
+	std::error_code filesystem_error;
+	if (!path.parent_path().empty()) std::filesystem::create_directories(path.parent_path(), filesystem_error);
+	const std::filesystem::path temporary = path.string() + ".tmp";
+	std::ofstream stream(temporary, std::ios::binary | std::ios::trunc);
+	stream.write(reinterpret_cast<const char *>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
+	stream.close();
+	if (!stream)
+	{
+		error = "could not write Studio surface sidecar";
+		std::filesystem::remove(temporary, filesystem_error);
+		return false;
+	}
+	std::filesystem::remove(path, filesystem_error);
+	filesystem_error.clear();
+	std::filesystem::rename(temporary, path, filesystem_error);
+	if (filesystem_error)
+	{
+		error = "could not publish Studio surface sidecar";
+		std::filesystem::remove(temporary, filesystem_error);
+		return false;
 	}
 	return true;
 }
@@ -244,7 +350,7 @@ int run(int argc, char **argv)
 	arguments args;
 	if (!parse_arguments(argc, argv, args))
 	{
-		std::cerr << "usage: cs2fow_baker --game <cs2-root> --map <name> [--vpk <file>] [--low-priority] [--output <file>] [--vrf <path>] [--debug-obj <file>]\n"
+		std::cerr << "usage: cs2fow_baker --game <cs2-root> --map <name> [--vpk <file>] [--low-priority] [--output <file>] [--vrf <path>] [--debug-obj <file>] [--studio-surfaces <file>]\n"
 			<< "       cs2fow_baker --list-maps --vpk <file>\n"
 			<< "       cs2fow_baker --inspect-bvh8 <file>\n";
 		return 2;
@@ -328,8 +434,9 @@ int run(int argc, char **argv)
 		return 1;
 	}
 	std::vector<triangle> triangles;
+	std::vector<std::string> triangle_surfaces;
 	import_report report;
-	if (!import_physics_glb(glb, triangles, report, error))
+	if (!import_physics_glb(glb, triangles, report, error, args.studio_surfaces.empty() ? nullptr : &triangle_surfaces))
 	{
 		std::cerr << "cs2fow_baker: " << error << '\n';
 		std::filesystem::remove_all(temporary);
@@ -342,7 +449,8 @@ int run(int argc, char **argv)
 		return 1;
 	}
 	bvh8_data data;
-	if (!build_bvh8(triangles, data, error))
+	std::vector<uint32_t> packet_sources;
+	if (!build_bvh8(triangles, data, error, args.studio_surfaces.empty() ? nullptr : &packet_sources))
 	{
 		std::cerr << "cs2fow_baker: " << error << '\n';
 		return 1;
@@ -360,6 +468,12 @@ int run(int argc, char **argv)
 	if (!load_bvh8(args.output, verified, error) || verified.header.payload_crc32 != data.header.payload_crc32)
 	{
 		std::cerr << "cs2fow_baker: output validation failed: " << error << '\n';
+		return 1;
+	}
+	if (!args.studio_surfaces.empty() && !write_surface_sidecar(args.studio_surfaces, args.map, data,
+		triangle_surfaces, packet_sources, error))
+	{
+		std::cerr << "cs2fow_baker: " << error << '\n';
 		return 1;
 	}
 	if (!args.debug_obj.empty() && !write_obj(args.debug_obj, triangles, error))

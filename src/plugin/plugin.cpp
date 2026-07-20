@@ -191,7 +191,8 @@ bool plugin::Load(PluginId id, ISmmAPI *ismm, char *error, size_t maxlen, bool l
 
 	std::string reason;
 	const bool avx = cpu_supports_avx();
-	prerequisites_valid_ = avx && read_gamedata(reason) && verify_server_binary(reason) && resolve_schema(reason);
+	prerequisites_valid_ = avx && read_gamedata(reason) && verify_server_binary(reason)
+		&& resolve_bone_functions(reason) && resolve_schema(reason);
 	if (prerequisites_valid_ && game_event_manager_vtable_rva_ != 0)
 	{
 		void *base = module_base(*reinterpret_cast<void **>(game_entities_));
@@ -297,6 +298,8 @@ bool plugin::read_gamedata(std::string &error)
 	transmit_offsets_ = {};
 	smoke_layout_ = {};
 	game_event_manager_vtable_rva_ = 0;
+	lookup_bone_rva_ = 0;
+	get_bone_transform_rva_ = 0;
 	smoke_gamedata_available_ = true;
 #if defined(_WIN32)
 	constexpr std::string_view k_recipient_key = "recipient_slot_offset_windows";
@@ -310,6 +313,8 @@ bool plugin::read_gamedata(std::string &error)
 	constexpr std::string_view k_smoke_center_key = "smoke_center_offset_windows";
 	constexpr std::string_view k_smoke_start_time_key = "smoke_start_time_offset_windows";
 	constexpr std::string_view k_game_event_vtable_key = "game_event_manager_vtable_rva_windows";
+	constexpr std::string_view k_lookup_bone_key = "lookup_bone_rva_windows";
+	constexpr std::string_view k_get_bone_transform_key = "get_bone_transform_rva_windows";
 #else
 	constexpr std::string_view k_recipient_key = "recipient_slot_offset_linux";
 	constexpr std::string_view k_server_size_key = "server_binary_size_linux";
@@ -322,6 +327,8 @@ bool plugin::read_gamedata(std::string &error)
 	constexpr std::string_view k_smoke_center_key = "smoke_center_offset_linux";
 	constexpr std::string_view k_smoke_start_time_key = "smoke_start_time_offset_linux";
 	constexpr std::string_view k_game_event_vtable_key = "game_event_manager_vtable_rva_linux";
+	constexpr std::string_view k_lookup_bone_key = "lookup_bone_rva_linux";
+	constexpr std::string_view k_get_bone_transform_key = "get_bone_transform_rva_linux";
 #endif
 	std::string line;
 	while (std::getline(stream, line))
@@ -335,7 +342,7 @@ bool plugin::read_gamedata(std::string &error)
 		const bool smoke_key = key == k_smoke_volume_key || key == k_smoke_storage_key || key == k_smoke_frame_key
 			|| key == k_smoke_center_key || key == k_smoke_start_time_key;
 		if (key != k_server_size_key && key != k_server_crc_key && key != k_recipient_key && key != k_entity_system_key && key != k_full_update_key
-			&& key != k_game_event_vtable_key && !smoke_key)
+			&& key != k_game_event_vtable_key && key != k_lookup_bone_key && key != k_get_bone_transform_key && !smoke_key)
 		{
 			continue;
 		}
@@ -362,16 +369,21 @@ bool plugin::read_gamedata(std::string &error)
 		if (key == k_smoke_center_key) smoke_layout_.center = value;
 		if (key == k_smoke_start_time_key) smoke_layout_.start_time = value;
 		if (key == k_game_event_vtable_key) game_event_manager_vtable_rva_ = value;
+		if (key == k_lookup_bone_key) lookup_bone_rva_ = value;
+		if (key == k_get_bone_transform_key) get_bone_transform_rva_ = value;
 	}
 	if (server_binary_size_ == 0 || server_binary_crc32_ == 0 || recipient_slot_offset_ == 0
-		|| entity_system_offset_ == 0 || transmit_offsets_.full_update_offset == 0)
+		|| entity_system_offset_ == 0 || transmit_offsets_.full_update_offset == 0
+		|| lookup_bone_rva_ == 0 || get_bone_transform_rva_ == 0)
 	{
 		error = "gamedata does not contain this platform's required values";
 		return false;
 	}
 	if (recipient_slot_offset_ < sizeof(CCheckTransmitInfo) || recipient_slot_offset_ > k_max_gamedata_offset || recipient_slot_offset_ % alignof(int) != 0
 		|| entity_system_offset_ < sizeof(void *) || entity_system_offset_ > k_max_gamedata_offset || entity_system_offset_ % alignof(void *) != 0
-		|| !valid_gamedata_offset(transmit_offsets_.full_update_offset, static_cast<uint32_t>(alignof(bool)), k_max_gamedata_offset))
+		|| !valid_gamedata_offset(transmit_offsets_.full_update_offset, static_cast<uint32_t>(alignof(bool)), k_max_gamedata_offset)
+		|| !valid_gamedata_offset(lookup_bone_rva_, 1, k_max_module_rva)
+		|| !valid_gamedata_offset(get_bone_transform_rva_, 1, k_max_module_rva))
 	{
 		error = "gamedata contains invalid offsets for this platform";
 		return false;
@@ -421,6 +433,19 @@ bool plugin::verify_server_binary(std::string &error)
 		error = message.str();
 		return false;
 	}
+	return true;
+}
+
+bool plugin::resolve_bone_functions(std::string &error)
+{
+	void *base = game_entities_ == nullptr ? nullptr : module_base(*reinterpret_cast<void **>(game_entities_));
+	if (base == nullptr)
+	{
+		error = "could not resolve the loaded server binary base for animated body points";
+		return false;
+	}
+	lookup_bone_ = static_cast<uint8_t *>(base) + lookup_bone_rva_;
+	get_bone_transform_ = static_cast<uint8_t *>(base) + get_bone_transform_rva_;
 	return true;
 }
 
@@ -676,11 +701,17 @@ void plugin::print_status() const
 	const worker_stats stats = worker_.stats();
 	const std::shared_ptr<const visibility_result> result = worker_.result();
 	runtime_timing_stats capture_timing;
+	runtime_timing_stats bone_timing;
 	runtime_timing_stats transmit_timing;
+	uint32_t animated_players = 0;
+	uint32_t static_fallback_players = 0;
 	{
 		std::lock_guard<std::mutex> lock(transmit_state_mutex_);
 		capture_timing = capture_timing_;
+		bone_timing = bone_timing_;
 		transmit_timing = transmit_timing_;
+		animated_players = animated_players_;
+		static_fallback_players = static_fallback_players_;
 	}
 	const double age_ms = result ? std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - result->captured).count() : -1.0;
 	META_CONPRINTF("[CS2FOW] %s; map=%s crc=0x%08x version=%u triangles=%u nodes=%u packets=%u bytes=%llu depth=%u\n",
@@ -693,6 +724,9 @@ void plugin::print_status() const
 	META_CONPRINTF("[CS2FOW] capture latest=%.3fms average=%.3fms maximum=%.3fms calls=%llu\n",
 		capture_timing.latest_ms, capture_timing.average_ms(), capture_timing.maximum_ms,
 		static_cast<unsigned long long>(capture_timing.calls));
+	META_CONPRINTF("[CS2FOW] bones latest=%.3fms average=%.3fms maximum=%.3fms calls=%llu animated=%u fallback=%u\n",
+		bone_timing.latest_ms, bone_timing.average_ms(), bone_timing.maximum_ms,
+		static_cast<unsigned long long>(bone_timing.calls), animated_players, static_fallback_players);
 	META_CONPRINTF("[CS2FOW] transmit latest=%.3fms average=%.3fms maximum=%.3fms calls=%llu\n",
 		transmit_timing.latest_ms, transmit_timing.average_ms(), transmit_timing.maximum_ms,
 		static_cast<unsigned long long>(transmit_timing.calls));

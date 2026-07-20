@@ -8,6 +8,7 @@
 #include "smoke_occlusion.h"
 #include "visibility_sampling.h"
 
+#include <algorithm>
 #include <array>
 #include <chrono>
 #include <condition_variable>
@@ -35,6 +36,8 @@ struct player_state
 	float rtt_seconds {};
 	uint64_t movement_buttons {};
 	weapon_muzzle_class muzzle_class {weapon_muzzle_class::none};
+	std::array<vec3, k_visibility_body_point_count> body_points {};
+	uint32_t body_point_count {};
 	int pawn_entity {-1};
 };
 
@@ -46,7 +49,9 @@ inline bool valid_player_numbers(const player_state &player)
 	};
 	return finite(player.origin) && finite(player.eye) && finite(player.mins) && finite(player.maxs)
 		&& std::isfinite(player.eye_yaw_degrees) && std::isfinite(player.rtt_seconds)
-		&& player.mins.x <= player.maxs.x && player.mins.y <= player.maxs.y && player.mins.z <= player.maxs.z;
+		&& player.mins.x <= player.maxs.x && player.mins.y <= player.maxs.y && player.mins.z <= player.maxs.z
+		&& (player.body_point_count == 0 || (player.body_point_count == player.body_points.size()
+			&& std::all_of(player.body_points.begin(), player.body_points.end(), finite)));
 }
 
 inline bool visibility_pair_enabled(uint32_t recipient, uint32_t target, const player_state &from,

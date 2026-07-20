@@ -28,7 +28,7 @@ struct body_point
 	vec3 local;
 };
 
-constexpr std::array<body_point, 15> k_body_points {{
+constexpr std::array<body_point, k_visibility_body_point_count> k_body_points {{
 	{{5.609201635493794f, -1.4428278502142438f, 64.2012733036622f}},
 	{{2.0125293444485384f, 2.7306012182339385f, 59.938710028873956f}},
 	{{0.0f, 3.6606043089445834f, 54.0f}},
@@ -166,6 +166,14 @@ void add_aabb_corners(visibility_target_points &targets, bounds box)
 
 void add_body_points(visibility_target_points &targets, const visibility_player &player, vec3 origin)
 {
+	if (player.body_point_count == player.body_points.size())
+	{
+		for (vec3 point : player.body_points)
+		{
+			add_point(targets, point);
+		}
+		return;
+	}
 	for (const body_point &point : k_body_points)
 	{
 		add_point(targets, local_to_world(player, origin, point.local));
@@ -183,6 +191,54 @@ void add_muzzle_point(visibility_target_points &targets, const visibility_player
 }
 
 } // namespace
+
+const std::array<visibility_body_binding, k_visibility_body_point_count> k_visibility_body_bindings {{
+	{"head_0", {-6.583533f, 6.974191f, -1.442826f}},
+	{"neck_0", {-3.579878f, 6.462899f, 2.730605f}},
+	{"spine_3", {-4.567842f, 3.748647f, 3.660606f}},
+	{"pelvis", {-4.824802f, -0.599556f, 5.946114f}},
+	{"arm_upper_L", {0.424835f, 9.730416f, -3.004129f}},
+	{"arm_upper_R", {0.987906f, 1.396868f, 0.034221f}},
+	{"leg_upper_L", {0.985176f, -6.111486f, 7.523203f}},
+	{"leg_upper_R", {-1.085612f, -1.173614f, -1.729821f}},
+	{"leg_lower_L", {-2.260681f, -12.971139f, -1.848936f}},
+	{"leg_lower_R", {0.532510f, -2.178953f, -2.248215f}},
+	{"ankle_L", {14.535840f, 7.542427f, -2.333007f}},
+	{"ankle_R", {6.831867f, 4.143797f, 2.375296f}},
+	{"arm_lower_R", {-0.079149f, -5.299527f, -3.384076f}},
+	{"arm_lower_L", {2.545455f, 22.522351f, 3.338776f}},
+	{"spine_2", {-5.793778f, -0.510446f, 4.308481f}}
+}};
+
+bool visibility_transform_body_point(const visibility_bone_transform &transform, vec3 local, vec3 &world)
+{
+	const float x = transform.rotation[0];
+	const float y = transform.rotation[1];
+	const float z = transform.rotation[2];
+	const float w = transform.rotation[3];
+	const float norm = x * x + y * y + z * z + w * w;
+	if (!std::isfinite(transform.position.x) || !std::isfinite(transform.position.y)
+		|| !std::isfinite(transform.position.z) || !std::isfinite(norm) || norm < 0.25f || norm > 4.0f)
+	{
+		return false;
+	}
+	const float inverse_length = 1.0f / std::sqrt(norm);
+	const float qx = x * inverse_length;
+	const float qy = y * inverse_length;
+	const float qz = z * inverse_length;
+	const float qw = w * inverse_length;
+	const vec3 twice_cross {
+		2.0f * (qy * local.z - qz * local.y),
+		2.0f * (qz * local.x - qx * local.z),
+		2.0f * (qx * local.y - qy * local.x)
+	};
+	world = {
+		transform.position.x + local.x + qw * twice_cross.x + qy * twice_cross.z - qz * twice_cross.y,
+		transform.position.y + local.y + qw * twice_cross.y + qz * twice_cross.x - qx * twice_cross.z,
+		transform.position.z + local.z + qw * twice_cross.z + qx * twice_cross.y - qy * twice_cross.x
+	};
+	return std::isfinite(world.x) && std::isfinite(world.y) && std::isfinite(world.z);
+}
 
 float visibility_shoulder_offset_units(float rtt_seconds, const visibility_tuning &tuning)
 {

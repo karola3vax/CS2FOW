@@ -164,9 +164,14 @@ bool physics_group_accepted(const std::vector<std::string> &tags, const std::str
 	return std::any_of(std::begin(opaque), std::end(opaque), [&surface](std::string_view value) { return surface.starts_with(value); });
 }
 
-bool import_physics_glb(const std::filesystem::path &path, std::vector<triangle> &triangles, import_report &report, std::string &error)
+bool import_physics_glb(const std::filesystem::path &path, std::vector<triangle> &triangles, import_report &report, std::string &error,
+	std::vector<std::string> *triangle_surfaces)
 {
 	triangles.clear();
+	if (triangle_surfaces != nullptr)
+	{
+		triangle_surfaces->clear();
+	}
 	report = {};
 	cgltf_options options {};
 	cgltf_data *data = nullptr;
@@ -237,6 +242,10 @@ bool import_physics_glb(const std::filesystem::path &path, std::vector<triangle>
 					continue;
 				}
 				triangles.push_back(value);
+				if (triangle_surfaces != nullptr)
+				{
+					triangle_surfaces->push_back(group.surface_property);
+				}
 			}
 		}
 		report.groups.push_back(std::move(group));

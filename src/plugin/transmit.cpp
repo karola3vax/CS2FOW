@@ -135,8 +135,12 @@ void plugin::reset_transmit_state(bool clear_debug_records)
 		}
 	}
 	he_clearance_history_.clear();
+	player_bone_cache_.fill({});
 	capture_timing_ = {};
+	bone_timing_ = {};
 	transmit_timing_ = {};
+	animated_players_ = 0;
+	static_fallback_players_ = 0;
 	if (clear_debug_records)
 	{
 		recent_hides_.clear();

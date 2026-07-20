@@ -96,9 +96,10 @@ The game thread runs `hook_game_frame`. At most once per configured interval (de
 
 1. reads controllers and pawns through resolved schema fields;
 2. rejects HLTV, invalid controller/pawn links, spawning/dead players, non-T/CT teams, invalid bounds, and uncertain lifecycles;
-3. copies origin, current movement buttons, eye position/yaw, bounds, round-trip latency, team, pawn index, and held-weapon muzzle class;
-4. builds/checks visual groups for lifecycle identity, but never gives live engine pointers to the worker; and
-5. submits a plain copied `visibility_snapshot` with a rising sequence number.
+3. asks CS2 for the current pose, copies fifteen animated body points, and falls back to the fixed points if that pose is unavailable;
+4. copies origin, current movement buttons, eye position/yaw, bounds, round-trip latency, team, pawn index, and held-weapon muzzle class;
+5. builds/checks visual groups for lifecycle identity, but never gives live engine pointers to the worker; and
+6. submits a plain copied `visibility_snapshot` with a rising sequence number.
 
 `visibility_worker::submit` stores only the newest pending snapshot. Work does not form a backlog. The worker wakes, takes ownership of that copy, and computes a new result.
 
@@ -106,7 +107,7 @@ For each eligible living pair the worker:
 
 - makes five fixed recipient origins: eye, RTT-scaled left/right shoulders, eye plus 16 units, and feet;
 - adds one wall-clipped, RTT-scaled W/S or diagonal intention origin; pure A/D already uses the matching shoulder point;
-- makes target samples from padded AABB corners, fifteen tuned body points, and a held-weapon muzzle point;
+- makes target samples from padded AABB corners, fifteen tuned points that follow the copied pose, and a held-weapon muzzle point;
 - casts at most `6 x 24 = 144` rays, testing baked walls first and then copied live smoke, and stopping at the first open ray;
 - lets an HE clear only smoke that already existed when the detonation was recorded on the same game clock;
 - first tries the triangle packet that blocked the same pair's earlier ray, then traverses the BVH8 if needed; and

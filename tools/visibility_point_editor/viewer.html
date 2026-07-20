@@ -11,21 +11,18 @@
 		:root {
 			color-scheme: light;
 			font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-			--ink: #151618;
-			--muted: #686b70;
-			--quiet: #8d9095;
-			--line: rgba(26, 28, 31, 0.12);
-			--surface: rgba(255, 255, 255, 0.78);
-			--surface-solid: #f8f8f7;
-			--surface-strong: rgba(255, 255, 255, 0.94);
-			--red: #df1f2d;
-			--red-dark: #b61020;
-			--green: #16794c;
-			--shadow: 0 22px 60px rgba(35, 38, 42, 0.13), 0 2px 10px rgba(35, 38, 42, 0.06);
-			--radius: 22px;
-			--edge: clamp(14px, 1.5vw, 28px);
-			--left-width: clamp(280px, 20vw, 320px);
-			--right-width: clamp(370px, 25vw, 420px);
+			--ink: #161719;
+			--muted: #6d7177;
+			--quiet: #92969c;
+			--line: rgba(24, 27, 31, 0.11);
+			--glass: rgba(249, 250, 251, 0.94);
+			--glass-strong: rgba(255, 255, 255, 0.97);
+			--red: #e51d2e;
+			--red-dark: #b90f20;
+			--green: #13784a;
+			--edge: clamp(12px, 1.2vw, 20px);
+			--inspector-width: clamp(340px, 24vw, 382px);
+			--shadow: 0 24px 70px rgba(42, 47, 54, 0.13), 0 2px 10px rgba(42, 47, 54, 0.06);
 		}
 		* {
 			box-sizing: border-box;
@@ -36,9 +33,12 @@
 		}
 		body {
 			margin: 0;
-			min-width: 1100px;
+			min-width: 1180px;
 			overflow: hidden;
-			background: #eceeed;
+			background:
+				radial-gradient(circle at 41% 45%, rgba(255, 255, 255, 0.98) 0 16%, rgba(255, 255, 255, 0.42) 38%, transparent 57%),
+				radial-gradient(ellipse at 46% 62%, rgba(229, 29, 46, 0.08), transparent 31%),
+				linear-gradient(145deg, #f5f6f7 0%, #e9ecef 48%, #f7f8f9 100%);
 			color: var(--ink);
 		}
 		button, input, select {
@@ -47,64 +47,71 @@
 		button {
 			color: inherit;
 		}
-		button:focus-visible, input:focus-visible, select:focus-visible {
-			outline: 3px solid rgba(223, 31, 45, 0.24);
+		button:focus-visible, input:focus-visible, select:focus-visible, summary:focus-visible {
+			outline: 3px solid rgba(229, 29, 46, 0.24);
 			outline-offset: 2px;
 		}
-		button:disabled {
+		button:disabled, input:disabled, select:disabled {
 			cursor: not-allowed;
-			opacity: 0.42;
+			opacity: 0.45;
 		}
 		#view {
 			position: fixed;
 			inset: 0;
+			z-index: 0;
 			display: block;
 			width: 100vw;
 			height: 100vh;
-			z-index: 0;
 		}
-		.floating {
-			z-index: 3;
-			border: 1px solid rgba(255, 255, 255, 0.72);
-			background: var(--surface);
+		.glass {
+			z-index: 4;
+			border: 1px solid rgba(255, 255, 255, 0.86);
+			background: var(--glass);
 			box-shadow: var(--shadow);
-			backdrop-filter: blur(28px) saturate(135%);
-			-webkit-backdrop-filter: blur(28px) saturate(135%);
+		}
+		@supports ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+			.glass {
+				background: rgba(248, 250, 252, 0.72);
+				backdrop-filter: blur(30px) saturate(150%);
+				-webkit-backdrop-filter: blur(30px) saturate(150%);
+			}
 		}
 		.topbar {
 			position: fixed;
+			z-index: 20;
 			top: var(--edge);
 			left: var(--edge);
 			right: var(--edge);
-			height: 68px;
-			display: flex;
+			height: 58px;
+			display: grid;
+			grid-template-columns: minmax(230px, 1fr) auto minmax(480px, 1fr);
 			align-items: center;
 			gap: 18px;
-			padding: 10px 12px 10px 14px;
-			border-radius: 24px;
+			padding: 8px 10px 8px 12px;
+			border-radius: 20px;
 		}
 		.brand {
 			display: flex;
 			align-items: center;
-			gap: 11px;
-			min-width: 255px;
+			gap: 10px;
+			min-width: 0;
 		}
 		.brand-mark {
 			position: relative;
-			width: 38px;
-			height: 38px;
-			flex: 0 0 38px;
+			width: 36px;
+			height: 36px;
+			flex: 0 0 36px;
 			border-radius: 12px;
-			background: linear-gradient(145deg, #ef3340, var(--red-dark));
-			box-shadow: 0 8px 18px rgba(223, 31, 45, 0.24);
+			background: linear-gradient(145deg, #f13240, var(--red-dark));
+			box-shadow: 0 9px 22px rgba(229, 29, 46, 0.25);
 		}
 		.brand-mark::before {
 			content: "";
 			position: absolute;
-			left: 9px;
-			top: 12px;
-			width: 18px;
-			height: 11px;
+			left: 8px;
+			top: 11px;
+			width: 17px;
+			height: 10px;
 			border: 2px solid #fff;
 			border-radius: 55% 45% 55% 45%;
 			transform: rotate(-10deg);
@@ -112,96 +119,83 @@
 		.brand-mark::after {
 			content: "";
 			position: absolute;
-			left: 16px;
-			top: 16px;
+			left: 15px;
+			top: 15px;
 			width: 6px;
 			height: 6px;
 			border-radius: 50%;
 			background: #fff;
 		}
 		.brand-name {
-			font-size: 17px;
+			overflow: hidden;
+			font-size: 16px;
 			font-weight: 760;
 			letter-spacing: -0.025em;
-		}
-		.brand-subtitle {
-			margin-top: 2px;
-			color: var(--muted);
-			font-size: 11px;
-			font-weight: 560;
-			letter-spacing: 0.04em;
-			text-transform: uppercase;
-		}
-		.health {
-			display: flex;
-			align-items: center;
-			gap: 8px;
-			margin-left: auto;
-		}
-		.pill {
-			min-height: 32px;
-			display: inline-flex;
-			align-items: center;
-			gap: 7px;
-			padding: 0 11px;
-			border: 1px solid var(--line);
-			border-radius: 999px;
-			background: rgba(248, 248, 247, 0.75);
-			color: var(--muted);
-			font-size: 12px;
-			font-weight: 650;
+			text-overflow: ellipsis;
 			white-space: nowrap;
 		}
-		.pill::before {
-			content: "";
-			width: 7px;
-			height: 7px;
-			border-radius: 50%;
-			background: #9b9da1;
+		.brand-subtitle {
+			margin-top: 1px;
+			color: var(--muted);
+			font-size: 9px;
+			font-weight: 650;
+			letter-spacing: 0.08em;
+			text-transform: uppercase;
 		}
-		.pill.ok {
-			color: var(--green);
+		.mode-switch, .inspector-tabs {
+			display: grid;
+			gap: 3px;
+			padding: 3px;
+			border: 1px solid rgba(24, 27, 31, 0.06);
+			border-radius: 12px;
+			background: rgba(222, 225, 228, 0.7);
 		}
-		.pill.ok::before, .pill.ready::before {
-			background: #24a66a;
+		.mode-switch {
+			grid-template-columns: repeat(3, 70px);
 		}
-		.pill.bad {
-			color: var(--red-dark);
+		.mode-switch button, .inspector-tabs button {
+			min-height: 30px;
+			border: 0;
+			border-radius: 9px;
+			background: transparent;
+			color: var(--muted);
+			font-size: 11px;
+			font-weight: 710;
+			cursor: pointer;
+			transition: color 160ms ease, background 160ms ease, box-shadow 160ms ease;
 		}
-		.pill.bad::before {
-			background: var(--red);
+		.mode-switch button[aria-pressed="true"] {
+			background: #fff;
+			box-shadow: 0 2px 9px rgba(35, 39, 45, 0.1);
+			color: var(--ink);
 		}
-		.header-actions {
+		.top-actions {
 			display: flex;
 			align-items: center;
-			gap: 8px;
+			justify-content: flex-end;
+			gap: 6px;
 		}
 		.button {
-			min-height: 38px;
-			padding: 0 14px;
+			min-height: 36px;
+			padding: 0 12px;
 			border: 1px solid var(--line);
-			border-radius: 12px;
+			border-radius: 11px;
 			background: rgba(255, 255, 255, 0.72);
-			font-size: 12px;
-			font-weight: 680;
-			letter-spacing: -0.005em;
+			font-size: 11px;
+			font-weight: 690;
 			cursor: pointer;
-			transition: transform 160ms ease, border-color 160ms ease, background 160ms ease, box-shadow 160ms ease;
+			transition: border-color 160ms ease, background 160ms ease, box-shadow 160ms ease;
 		}
 		.button:hover:not(:disabled) {
-			border-color: rgba(24, 26, 29, 0.24);
+			border-color: rgba(24, 27, 31, 0.22);
 			background: #fff;
-			box-shadow: 0 6px 16px rgba(35, 38, 42, 0.08);
-			transform: translateY(-1px);
-		}
-		.button:active:not(:disabled) {
-			transform: translateY(0);
+			box-shadow: 0 7px 18px rgba(35, 39, 45, 0.08);
 		}
 		.button.primary {
 			border-color: transparent;
 			background: var(--red);
 			color: #fff;
-			box-shadow: 0 8px 18px rgba(223, 31, 45, 0.2);
+			box-shadow: 0 8px 20px rgba(229, 29, 46, 0.2);
 		}
 		.button.primary:hover:not(:disabled) {
 			background: var(--red-dark);
@@ -214,144 +208,113 @@
 		}
 		.export-menu {
 			position: absolute;
+			z-index: 30;
 			top: calc(100% + 8px);
 			right: 0;
-			width: 176px;
+			width: 168px;
 			padding: 6px;
-			border: 1px solid rgba(24, 26, 29, 0.1);
+			border: 1px solid var(--line);
 			border-radius: 14px;
-			background: rgba(255, 255, 255, 0.96);
-			box-shadow: 0 18px 40px rgba(35, 38, 42, 0.16);
-			backdrop-filter: blur(24px);
+			background: rgba(255, 255, 255, 0.97);
+			box-shadow: 0 20px 46px rgba(35, 39, 45, 0.16);
 		}
-		.export-menu[hidden] {
+		.export-menu[hidden], .inspector-panel[hidden] {
 			display: none;
 		}
 		.export-menu button {
 			width: 100%;
-			min-height: 36px;
+			min-height: 35px;
 			padding: 0 10px;
 			border: 0;
 			border-radius: 9px;
 			background: transparent;
 			text-align: left;
-			font-size: 12px;
-			font-weight: 620;
+			font-size: 11px;
+			font-weight: 650;
 			cursor: pointer;
 		}
 		.export-menu button:hover, .export-menu button:focus-visible {
-			background: #f1f1ef;
+			background: #f1f2f3;
 		}
-		.card {
+		.inspector {
 			position: fixed;
-			top: calc(var(--edge) + 86px);
-			bottom: 78px;
+			top: calc(var(--edge) + 70px);
+			right: var(--edge);
+			bottom: var(--edge);
+			width: var(--inspector-width);
 			display: flex;
 			flex-direction: column;
 			min-height: 0;
-			border-radius: var(--radius);
+			border-radius: 22px;
 			overflow: hidden;
 		}
-		.scene-card {
-			left: var(--edge);
-			width: var(--left-width);
-		}
-		.points-card {
-			right: var(--edge);
-			width: var(--right-width);
-		}
-		.card-header {
+		.inspector-head {
 			display: flex;
-			align-items: flex-start;
+			align-items: flex-end;
 			justify-content: space-between;
 			gap: 12px;
-			padding: 20px 20px 14px;
+			padding: 18px 18px 13px;
 		}
 		.eyebrow {
-			margin: 0 0 5px;
+			margin: 0 0 4px;
 			color: var(--red);
-			font-size: 10px;
-			font-weight: 760;
-			letter-spacing: 0.12em;
+			font-size: 9px;
+			font-weight: 780;
+			letter-spacing: 0.13em;
 			text-transform: uppercase;
 		}
 		h1, h2, h3, p {
 			margin-top: 0;
 		}
-		h1, h2 {
+		h1 {
 			margin-bottom: 0;
-			font-size: 21px;
-			line-height: 1.1;
+			font-size: 20px;
+			line-height: 1.05;
 			letter-spacing: -0.035em;
 		}
-		h3 {
-			margin-bottom: 12px;
-			font-size: 13px;
-			letter-spacing: -0.015em;
+		h2, h3 {
+			margin-bottom: 11px;
+			font-size: 12px;
+			letter-spacing: -0.01em;
 		}
-		.count-badge {
-			padding: 6px 9px;
-			border-radius: 999px;
-			background: #ececea;
-			color: var(--muted);
-			font-size: 11px;
-			font-weight: 700;
-			white-space: nowrap;
+		.inspector-tabs {
+			grid-template-columns: repeat(5, 1fr);
+			margin: 0 14px 12px;
 		}
-		.segmented {
-			display: grid;
-			grid-template-columns: repeat(3, 1fr);
-			gap: 4px;
-			margin: 0 16px 14px;
-			padding: 4px;
-			border-radius: 13px;
-			background: rgba(226, 227, 225, 0.8);
+		.inspector-tabs button[aria-pressed="true"] {
+			background: rgba(255, 255, 255, 0.92);
+			box-shadow: 0 2px 9px rgba(35, 39, 45, 0.08);
+			color: var(--red-dark);
 		}
-		.segmented button {
-			min-height: 32px;
-			border: 0;
-			border-radius: 9px;
-			background: transparent;
-			color: var(--muted);
-			font-size: 11px;
-			font-weight: 700;
-			cursor: pointer;
-			transition: color 160ms ease, background 160ms ease, box-shadow 160ms ease;
-		}
-		.segmented button[aria-pressed="true"] {
-			background: #fff;
-			box-shadow: 0 2px 8px rgba(35, 38, 42, 0.09);
-			color: var(--ink);
-		}
-		.scene-content {
+		.inspector-body {
 			min-height: 0;
 			overflow: auto;
-			padding: 0 18px 20px;
-		}
-		.scene-panel[hidden] {
-			display: none;
+			padding: 0 14px 16px;
 		}
 		.section-block {
-			padding: 16px;
+			padding: 14px;
 			border: 1px solid var(--line);
 			border-radius: 16px;
-			background: rgba(255, 255, 255, 0.55);
+			background: rgba(255, 255, 255, 0.56);
 		}
-		.section-block + .section-block {
-			margin-top: 12px;
+		.section-block + .section-block, .section-block + details, details + .section-block {
+			margin-top: 10px;
 		}
 		.hint {
-			margin-bottom: 14px;
+			margin-bottom: 13px;
 			color: var(--muted);
-			font-size: 11px;
+			font-size: 10px;
 			line-height: 1.5;
+		}
+		.hint:last-child {
+			margin-bottom: 0;
 		}
 		.field {
 			display: block;
-			margin-bottom: 13px;
+			margin-bottom: 12px;
 			color: var(--muted);
-			font-size: 11px;
-			font-weight: 620;
+			font-size: 10px;
+			font-weight: 650;
 		}
 		.field:last-child {
 			margin-bottom: 0;
@@ -363,17 +326,17 @@
 		}
 		input[type="number"], input[type="text"], select {
 			width: 100%;
-			height: 38px;
+			height: 36px;
 			padding: 0 10px;
-			border: 1px solid rgba(24, 26, 29, 0.13);
+			border: 1px solid rgba(24, 27, 31, 0.13);
 			border-radius: 10px;
-			background: rgba(255, 255, 255, 0.8);
+			background: rgba(255, 255, 255, 0.82);
 			color: var(--ink);
-			font-size: 12px;
+			font-size: 11px;
 			transition: border-color 160ms ease, background 160ms ease, box-shadow 160ms ease;
 		}
 		input[type="number"]:focus, input[type="text"]:focus, select:focus {
-			border-color: rgba(223, 31, 45, 0.52);
+			border-color: rgba(229, 29, 46, 0.5);
 			background: #fff;
 		}
 		input[type="range"] {
@@ -383,108 +346,160 @@
 		.grid-3 {
 			display: grid;
 			grid-template-columns: repeat(3, 1fr);
-			gap: 8px;
+			gap: 7px;
 		}
 		.grid-3 .field {
-			margin-bottom: 10px;
+			margin-bottom: 9px;
 		}
-		.inline-actions {
+		.inline-actions, .point-actions {
 			display: flex;
-			gap: 8px;
-			margin-top: 12px;
+			gap: 6px;
 		}
-		.inline-actions .button {
-			flex: 1;
-			padding: 0 10px;
-		}
-		.point-actions {
+		.input-buttons {
 			display: grid;
 			grid-template-columns: repeat(4, 1fr);
 			gap: 6px;
-			padding: 0 16px 14px;
+		}
+		.input-buttons button[aria-pressed="true"] {
+			border-color: var(--red);
+			background: var(--red);
+			color: #fff;
+		}
+		.map-summary {
+			margin-bottom: 12px;
+			color: var(--muted);
+			font-size: 10px;
+			line-height: 1.5;
+		}
+		.map-summary strong {
+			display: block;
+			margin-bottom: 3px;
+			color: var(--ink);
+			font-size: 12px;
+		}
+		.map-summary.bad strong {
+			color: var(--red-dark);
+		}
+		.inline-actions {
+			margin-top: 10px;
+		}
+		.inline-actions .button, .point-actions .button {
+			flex: 1;
+			padding: 0 7px;
+		}
+		.point-actions {
+			margin-top: 12px;
 		}
 		.point-actions .button {
-			min-height: 34px;
-			padding: 0 7px;
-			font-size: 10px;
+			min-height: 32px;
+			font-size: 9px;
 		}
-		.points-list {
-			min-height: 120px;
-			flex: 1 1 auto;
-			overflow: auto;
-			margin: 0 16px;
-			padding: 5px;
+		.count-badge {
+			padding: 5px 8px;
+			border-radius: 999px;
+			background: #eceef0;
+			color: var(--muted);
+			font-size: 10px;
+			font-weight: 720;
+			white-space: nowrap;
+		}
+		.point-disclosure {
 			border: 1px solid var(--line);
 			border-radius: 16px;
-			background: rgba(242, 242, 240, 0.74);
+			background: rgba(255, 255, 255, 0.52);
+			overflow: hidden;
+		}
+		.point-disclosure summary {
+			display: flex;
+			align-items: center;
+			justify-content: space-between;
+			gap: 12px;
+			min-height: 46px;
+			padding: 0 13px;
+			list-style: none;
+			font-size: 11px;
+			font-weight: 720;
+			cursor: pointer;
+		}
+		.point-disclosure summary::-webkit-details-marker {
+			display: none;
+		}
+		.point-disclosure summary::after {
+			content: "+";
+			margin-left: auto;
+			color: var(--muted);
+			font-size: 17px;
+			font-weight: 400;
+		}
+		.point-disclosure[open] summary::after {
+			content: "–";
+		}
+		.points-list {
+			max-height: 282px;
+			overflow: auto;
+			padding: 4px 6px 7px;
+			border-top: 1px solid var(--line);
+			background: rgba(240, 242, 244, 0.46);
 		}
 		.point-row {
 			width: 100%;
-			min-height: 42px;
+			min-height: 37px;
 			display: grid;
 			grid-template-columns: minmax(0, 1fr) auto;
 			align-items: center;
-			gap: 12px;
-			padding: 7px 9px;
+			gap: 9px;
+			padding: 6px 8px;
 			border: 1px solid transparent;
-			border-radius: 11px;
+			border-radius: 10px;
 			background: transparent;
 			text-align: left;
 			cursor: pointer;
-			transition: color 160ms ease, border-color 160ms ease, background 160ms ease, transform 160ms ease;
+			transition: color 160ms ease, border-color 160ms ease, background 160ms ease;
 		}
 		.point-row:hover {
-			background: rgba(255, 255, 255, 0.8);
+			background: rgba(255, 255, 255, 0.76);
 		}
 		.point-row[aria-selected="true"] {
-			border-color: rgba(223, 31, 45, 0.22);
+			border-color: rgba(229, 29, 46, 0.2);
 			background: #fff;
-			box-shadow: 0 5px 16px rgba(35, 38, 42, 0.08);
 			color: var(--red-dark);
-			transform: translateX(2px);
 		}
 		.point-name {
 			overflow: hidden;
-			font-size: 12px;
-			font-weight: 700;
+			font-size: 11px;
+			font-weight: 720;
 			text-overflow: ellipsis;
 			white-space: nowrap;
 		}
 		.point-coords {
 			color: var(--quiet);
 			font-family: ui-monospace, "SFMono-Regular", Consolas, monospace;
-			font-size: 9px;
+			font-size: 8px;
 			white-space: nowrap;
 		}
-		.properties {
-			flex: 0 0 auto;
-			margin: 14px 16px 16px;
-			padding: 15px;
-			border: 1px solid var(--line);
-			border-radius: 16px;
-			background: rgba(255, 255, 255, 0.64);
-		}
-		.status-strip {
+		.hud {
 			position: fixed;
-			left: var(--edge);
-			right: var(--edge);
 			bottom: var(--edge);
-			min-height: 46px;
+			z-index: 3;
+			min-height: 42px;
+			border-radius: 15px;
+			font-size: 9px;
+		}
+		.metrics-hud {
+			left: var(--edge);
 			display: flex;
 			align-items: center;
-			gap: 18px;
-			padding: 8px 16px;
-			border-radius: 17px;
-			font-size: 10px;
+			gap: 13px;
+			padding: 8px 12px;
 		}
 		.metric {
 			display: flex;
 			align-items: baseline;
-			gap: 5px;
+			gap: 4px;
 			white-space: nowrap;
 		}
 		.metric strong {
-			font-size: 12px;
+			font-size: 11px;
 		}
 		.metric span, .coordinate-note {
 			color: var(--muted);
@@ -492,15 +507,153 @@
 		.coordinate-note {
 			white-space: nowrap;
 		}
+		.state-hud {
+			right: calc(var(--edge) + var(--inspector-width) + 12px);
+			max-width: 390px;
+			display: flex;
+			align-items: center;
+			gap: 7px;
+			padding: 6px;
+		}
+		.pill {
+			min-height: 28px;
+			display: inline-flex;
+			align-items: center;
+			gap: 6px;
+			padding: 0 8px;
+			border: 1px solid var(--line);
+			border-radius: 999px;
+			background: rgba(255, 255, 255, 0.76);
+			color: var(--muted);
+			font-size: 9px;
+			font-weight: 680;
+			white-space: nowrap;
+		}
+		.pill::before {
+			content: "";
+			width: 6px;
+			height: 6px;
+			border-radius: 50%;
+			background: #999da2;
+		}
+		.pill.ok {
+			color: var(--green);
+		}
+		.pill.ok::before, .pill.ready::before {
+			background: #22a66a;
+		}
+		.pill.bad {
+			color: var(--red-dark);
+		}
+		.pill.bad::before {
+			background: var(--red);
+		}
 		.status-message {
 			min-width: 0;
-			margin-left: auto;
 			overflow: hidden;
+			padding: 0 7px;
 			color: var(--muted);
-			font-weight: 600;
-			text-align: right;
+			font-weight: 620;
 			text-overflow: ellipsis;
 			white-space: nowrap;
+		}
+		.play-hud {
+			position: fixed;
+			z-index: 16;
+			inset: 0;
+			pointer-events: none;
+		}
+		.play-hud[hidden] {
+			display: none;
+		}
+		.play-hud {
+			--cs2-gold: #f1c75b;
+			--cs2-panel: rgba(13, 18, 22, 0.78);
+			color: #f6f4ed;
+			font-family: "Arial Narrow", "Roboto Condensed", Arial, sans-serif;
+			text-shadow: 0 1px 2px rgba(0, 0, 0, 0.9);
+		}
+		.crosshair {
+			position: absolute;
+			left: 50%;
+			top: 50%;
+			width: 9px;
+			height: 9px;
+			background:
+				linear-gradient(#00e7e7 0 0) top center / 2px 3px no-repeat,
+				linear-gradient(#00e7e7 0 0) bottom center / 2px 3px no-repeat,
+				linear-gradient(#00e7e7 0 0) center left / 3px 2px no-repeat,
+				linear-gradient(#00e7e7 0 0) center right / 3px 2px no-repeat;
+			transform: translate(-50%, -50%);
+		}
+		.play-card {
+			position: absolute;
+			left: 24px;
+			top: 24px;
+			width: min(680px, calc(100vw - 48px));
+			padding: 12px 16px 11px;
+			border-left: 3px solid var(--cs2-gold);
+			background: linear-gradient(90deg, rgba(13, 18, 22, 0.84), rgba(13, 18, 22, 0.48));
+			box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
+			font-size: 13px;
+		}
+		.play-card .label { color: rgba(255, 255, 255, 0.58); font-size: 10px; font-weight: 850; letter-spacing: 0.14em; text-transform: uppercase; }
+		.play-gate-line { margin-top: 3px; color: #fff; font-size: 16px; }
+		.play-card .play-result { color: #ff7b86; font-weight: 850; }
+		.play-card .play-result.visible { color: #70e6a8; }
+		.play-gate-meta { margin-top: 3px; color: rgba(255, 255, 255, 0.72); font-size: 13px; }
+		.play-bvh { margin-top: 5px; color: rgba(255, 255, 255, 0.62); font-size: 12px; line-height: 1.4; }
+		.play-weapon-hud {
+			position: absolute;
+			right: 24px;
+			bottom: 24px;
+			padding: 9px 10px;
+			border: 1px solid rgba(255, 255, 255, 0.14);
+			border-radius: 13px;
+			background: rgba(13, 18, 22, 0.62);
+			box-shadow: 0 10px 26px rgba(0, 0, 0, 0.18);
+			backdrop-filter: blur(12px);
+		}
+		.play-inventory {
+			display: grid;
+			gap: 3px;
+			min-width: 188px;
+		}
+		.inventory-item {
+			display: grid;
+			grid-template-columns: 14px 86px 1fr;
+			align-items: center;
+			gap: 7px;
+			min-height: 27px;
+			padding: 3px 7px;
+			border-radius: 7px;
+			color: rgba(255, 255, 255, 0.56);
+			font-size: 10px;
+			font-weight: 700;
+			text-transform: uppercase;
+			text-shadow: none;
+		}
+		.inventory-item.active { background: rgba(241, 199, 91, 0.14); color: var(--cs2-gold); box-shadow: inset 2px 0 var(--cs2-gold); }
+		.inventory-item img { width: 82px; height: 22px; object-fit: contain; filter: brightness(0) invert(1); opacity: 0.56; }
+		.inventory-item.active img { filter: sepia(1) saturate(3) brightness(1.3); opacity: 1; }
+		.play-paused {
+			position: absolute;
+			left: 50%;
+			top: 50%;
+			padding: 12px 18px;
+			border: 1px solid rgba(241, 199, 91, 0.45);
+			background: rgba(13, 18, 22, 0.9);
+			color: var(--cs2-gold);
+			font-size: 13px;
+			font-weight: 720;
+			transform: translate(-50%, -50%);
+		}
+		body.play-locked .topbar,
+		body.play-locked .inspector,
+		body.play-locked .metrics-hud,
+		body.play-locked .state-hud {
+			opacity: 0;
+			pointer-events: none;
 		}
 		.hidden-file, .sr-only {
 			position: absolute;
@@ -514,45 +667,47 @@
 			border: 0;
 		}
 		::-webkit-scrollbar {
-			width: 9px;
+			width: 8px;
 		}
 		::-webkit-scrollbar-thumb {
 			border: 3px solid transparent;
 			border-radius: 999px;
-			background: rgba(37, 39, 42, 0.2);
+			background: rgba(37, 40, 44, 0.22);
 			background-clip: padding-box;
 		}
 		@media (max-width: 1280px) {
 			:root {
-				--left-width: 280px;
-				--right-width: 370px;
+				--inspector-width: 340px;
 			}
 			.topbar {
+				grid-template-columns: minmax(210px, 1fr) auto minmax(430px, 1fr);
 				gap: 10px;
 			}
-			.brand {
-				min-width: 220px;
-			}
-			.health {
+			.brand-subtitle {
 				display: none;
 			}
-			.header-actions .button {
-				padding: 0 11px;
+			.top-actions .button {
+				padding: 0 9px;
 			}
-			.status-strip {
-				gap: 11px;
+			.metrics-hud {
+				gap: 9px;
+			}
+			.coordinate-note {
+				display: none;
+			}
+			.state-hud {
+				max-width: 330px;
 			}
 		}
 		@media (max-height: 760px) {
-			.card-header {
-				padding-top: 16px;
+			.inspector-head {
+				padding-top: 14px;
 			}
-			.properties {
+			.section-block {
 				padding: 12px;
-				margin-top: 10px;
 			}
-			.point-row {
-				min-height: 36px;
+			.points-list {
+				max-height: 210px;
 			}
 		}
 		@media (prefers-reduced-motion: reduce) {
@@ -566,7 +721,7 @@
 <body>
 	<canvas id="view"></canvas>
 
-	<header class="topbar floating">
+	<header class="topbar glass">
 		<div class="brand" aria-label="CS2FOW Visibility Studio">
 			<span class="brand-mark" aria-hidden="true"></span>
 			<div>
@@ -574,11 +729,12 @@
 				<div class="brand-subtitle">LOS Point Editor</div>
 			</div>
 		</div>
-		<div class="health">
-			<div id="model-status" class="pill" aria-live="polite">Model: checking</div>
-			<div id="self-check" class="pill" role="status" aria-live="polite">Self-check: running</div>
+		<div class="mode-switch" role="group" aria-label="Studio mode">
+			<button id="runtime-animation" type="button" aria-pressed="false" disabled>Preview</button>
+			<button id="edit-mode" type="button" aria-pressed="true">Edit</button>
+			<button id="play-mode" type="button" aria-pressed="false" disabled>Play</button>
 		</div>
-		<div class="header-actions">
+		<div class="top-actions">
 			<button id="reset-camera" class="button" type="button">Reset Camera</button>
 			<button id="load-sas" class="button" type="button">Load Model</button>
 			<button id="import-los" class="button" type="button">Import LOS</button>
@@ -592,54 +748,109 @@
 		</div>
 		<input id="sas-file" class="hidden-file" type="file" accept=".glb,.gltf">
 		<input id="import-json" class="hidden-file" type="file" accept=".json,application/json">
+		<input id="map-file" class="hidden-file" type="file" accept=".bvh8,application/octet-stream">
 	</header>
 
-	<aside id="scene-card" class="card scene-card floating" aria-labelledby="scene-title">
-		<div class="card-header">
+	<aside id="inspector" class="inspector glass" aria-labelledby="inspector-title">
+		<div class="inspector-head">
 			<div>
-				<p class="eyebrow">Scene</p>
-				<h1 id="scene-title">Build the view</h1>
+				<p class="eyebrow">Workspace</p>
+				<h1 id="inspector-title">Inspector</h1>
 			</div>
 		</div>
-		<nav class="segmented" aria-label="Scene controls">
-			<button type="button" data-scene-tab="model" aria-pressed="true">Model</button>
+		<nav class="inspector-tabs" aria-label="Inspector sections">
+			<button type="button" data-scene-tab="points" aria-pressed="true">Points</button>
+			<button type="button" data-scene-tab="model" aria-pressed="false">Model</button>
 			<button type="button" data-scene-tab="weapon" aria-pressed="false">Weapon</button>
 			<button type="button" data-scene-tab="bounds" aria-pressed="false">Bounds</button>
+			<button type="button" data-scene-tab="map" aria-pressed="false">Map</button>
 		</nav>
-		<div class="scene-content">
-			<section class="scene-panel" data-scene-panel="model">
+		<div class="inspector-body">
+			<section class="inspector-panel" data-scene-panel="points">
+				<div class="section-block" aria-labelledby="selected-point-title">
+					<h2 id="selected-point-title">Selected point</h2>
+					<label class="field"><span>Name</span><input id="point-name" type="text" autocomplete="off"></label>
+					<div class="grid-3">
+						<label class="field"><span>X</span><input id="point-x" type="number" step="0.25"></label>
+						<label class="field"><span>Y</span><input id="point-y" type="number" step="0.25"></label>
+						<label class="field"><span>Z</span><input id="point-z" type="number" step="0.25"></label>
+					</div>
+					<div class="point-actions">
+						<button id="add-point" class="button" type="button">Add</button>
+						<button id="duplicate-point" class="button" type="button">Duplicate</button>
+						<button id="delete-point" class="button danger" type="button">Delete</button>
+						<button id="reset-points" class="button" type="button">Reset</button>
+					</div>
+				</div>
+				<details id="points-disclosure" class="point-disclosure">
+					<summary><span>All LOS points</span><span id="point-count" class="count-badge">0 points</span></summary>
+					<div id="points-list" class="points-list" role="listbox" aria-label="Editable LOS points"></div>
+				</details>
+			</section>
+
+			<section class="inspector-panel" data-scene-panel="model" hidden>
 				<div class="section-block">
-					<h3>Visibility</h3>
+					<h2>Runtime preview</h2>
+					<label class="field"><span>Player animation</span>
+						<select id="animation-clip" disabled>
+							<option value="idle">Standing idle</option>
+						</select>
+					</label>
+					<p class="hint">The list follows the selected weapon. Preview cross-fades real SAS movement, crouch, jump, fire, and reload clips while all 15 markers follow the bones.</p>
+				</div>
+				<div class="section-block">
+					<h2>Visibility</h2>
 					<label class="field"><span>Model opacity <output id="model-opacity-value">80%</output></span><input id="model-opacity" type="range" min="0.1" max="1" step="0.05" value="0.8"></label>
 					<label class="field"><span>Point opacity <output id="point-opacity-value">100%</output></span><input id="point-opacity" type="range" min="0.25" max="1" step="0.05" value="1"></label>
 				</div>
 				<div class="section-block">
-					<h3>Local model</h3>
-					<p class="hint">The studio loads ignored local SAS assets when available. You can also choose a GLB or GLTF from this machine.</p>
+					<h2>Local model</h2>
+					<p class="hint">The Studio loads ignored local SAS assets when available. You can also choose a GLB or GLTF from this machine.</p>
 					<button class="button" type="button" data-load-model>Choose Model</button>
 				</div>
 			</section>
 
-			<section class="scene-panel" data-scene-panel="weapon" hidden>
+			<section class="inspector-panel" data-scene-panel="weapon" hidden>
+				<div class="section-block">
+					<h2>Play loadout</h2>
+					<label class="field"><span>Primary weapon</span>
+						<select id="player-primary-select">
+							<option value="m4a1_silencer" selected>M4A1-S</option>
+							<option value="awp">AWP</option>
+						</select>
+					</label>
+					<p class="hint">In Play: 1 primary, 2 USP-S, 3 Karambit, and 4 Smoke/HE. Guns have real magazine sizes with unlimited reserve ammo.</p>
+				</div>
 				<div class="section-block">
 					<label class="field"><span>Weapon preview</span>
 						<select id="weapon-select">
 							<option value="">None</option>
-							<option value="usp_silencer">USP-S</option>
+						<option value="usp_silencer" selected>USP-S</option>
 							<option value="m4a1_silencer">M4A1-S</option>
 							<option value="awp">AWP</option>
+							<option value="knife">Karambit</option>
 						</select>
 					</label>
 					<div class="inline-actions"><button id="reset-weapon" class="button" type="button">Reset Grip</button></div>
 				</div>
 				<div class="section-block">
-					<h3>Position</h3>
+					<label class="field"><span>Bot weapon</span>
+						<select id="bot-weapon-select">
+							<option value="usp_silencer">USP-S</option>
+							<option value="m4a1_silencer" selected>M4A1-S</option>
+							<option value="awp">AWP</option>
+						</select>
+					</label>
+					<p class="hint">The roaming bot carries this independently. It never shoots.</p>
+				</div>
+				<div class="section-block">
+					<h2>Position</h2>
 					<div class="grid-3">
 						<label class="field"><span>X</span><input id="weapon-x" type="number" value="0" step="0.25"></label>
 						<label class="field"><span>Y</span><input id="weapon-y" type="number" value="0" step="0.25"></label>
 						<label class="field"><span>Z</span><input id="weapon-z" type="number" value="0" step="0.25"></label>
 					</div>
-					<h3>Rotation</h3>
+					<h2>Rotation</h2>
 					<div class="grid-3">
 						<label class="field"><span>Pitch</span><input id="weapon-rx" type="number" value="0" step="1"></label>
 						<label class="field"><span>Yaw</span><input id="weapon-ry" type="number" value="0" step="1"></label>
@@ -647,19 +858,28 @@
 					</div>
 					<label class="field"><span>Scale <output id="weapon-scale-value">1.00×</output></span><input id="weapon-scale" type="range" min="0.25" max="2" step="0.01" value="1"></label>
 				</div>
+				<div class="section-block">
+					<h2>First-person weapon position</h2>
+					<p class="hint">Moves only the weapon. The animated arms stay where they are.</p>
+					<div class="grid-3">
+						<label class="field"><span>X</span><input id="viewmodel-weapon-x" type="number" value="0" step="0.25"></label>
+						<label class="field"><span>Y</span><input id="viewmodel-weapon-y" type="number" value="0" step="0.25"></label>
+						<label class="field"><span>Z</span><input id="viewmodel-weapon-z" type="number" value="0" step="0.25"></label>
+					</div>
+				</div>
 			</section>
 
-			<section class="scene-panel" data-scene-panel="bounds" hidden>
+			<section class="inspector-panel" data-scene-panel="bounds" hidden>
 				<div class="section-block">
-					<h3>Collision bounds</h3>
-					<p class="hint">Eight AABB fallback points are generated from these bounds. They are visual context and are not exported.</p>
-					<h3>Minimum</h3>
+					<h2>Collision bounds</h2>
+					<p class="hint">Eight AABB fallback points come from these bounds. They are visual context and are not exported.</p>
+					<h2>Minimum</h2>
 					<div class="grid-3">
 						<label class="field"><span>X</span><input id="min-x" type="number" value="-16" step="1"></label>
 						<label class="field"><span>Y</span><input id="min-y" type="number" value="-16" step="1"></label>
 						<label class="field"><span>Z</span><input id="min-z" type="number" value="0" step="1"></label>
 					</div>
-					<h3>Maximum</h3>
+					<h2>Maximum</h2>
 					<div class="grid-3">
 						<label class="field"><span>X</span><input id="max-x" type="number" value="16" step="1"></label>
 						<label class="field"><span>Y</span><input id="max-y" type="number" value="16" step="1"></label>
@@ -667,45 +887,106 @@
 					</div>
 				</div>
 			</section>
+
+			<section class="inspector-panel" data-scene-panel="map" hidden>
+				<div class="section-block">
+					<h2>Baked collision map</h2>
+					<div id="map-summary" class="map-summary" role="status" aria-live="polite"><strong>No map loaded</strong>Mirage will load automatically when its local BVH8 is available.</div>
+					<div class="inline-actions">
+						<button id="reload-mirage" class="button" type="button">Reload Mirage</button>
+						<button id="load-map" class="button" type="button">Load BVH8</button>
+						<button id="unload-map" class="button danger" type="button" disabled>Unload</button>
+					</div>
+				</div>
+				<div class="section-block">
+					<h2>Place players</h2>
+					<p id="placement-status" class="hint">Load a map, then place the target and viewer on its collision mesh.</p>
+					<div class="inline-actions">
+						<button id="place-target" class="button" type="button" disabled>Place Target</button>
+						<button id="place-viewer" class="button" type="button" disabled>Place Viewer</button>
+					</div>
+					<h2>Target</h2>
+					<div class="grid-3">
+						<label class="field"><span>X</span><input id="target-x" type="number" value="0" step="1"></label>
+						<label class="field"><span>Y</span><input id="target-y" type="number" value="0" step="1"></label>
+						<label class="field"><span>Z</span><input id="target-z" type="number" value="0" step="1"></label>
+					</div>
+					<label class="field"><span>Yaw</span><input id="target-yaw" type="number" value="0" step="1"></label>
+					<h2>Viewer</h2>
+					<div class="grid-3">
+						<label class="field"><span>X</span><input id="viewer-x" type="number" value="256" step="1"></label>
+						<label class="field"><span>Y</span><input id="viewer-y" type="number" value="0" step="1"></label>
+						<label class="field"><span>Z</span><input id="viewer-z" type="number" value="0" step="1"></label>
+					</div>
+					<label class="field"><span>Yaw</span><input id="viewer-yaw" type="number" value="180" step="1"></label>
+				</div>
+				<div class="section-block">
+					<h2>Runtime origins</h2>
+					<label class="field"><span>Viewer ping <output id="viewer-ping-value">0 ms / 48 units</output></span><input id="viewer-ping" type="range" min="0" max="200" step="1" value="0"></label>
+					<div class="input-buttons" role="group" aria-label="Viewer movement input">
+						<button class="button" type="button" data-movement-button="w" aria-pressed="false">W</button>
+						<button class="button" type="button" data-movement-button="a" aria-pressed="false">A</button>
+						<button class="button" type="button" data-movement-button="s" aria-pressed="false">S</button>
+						<button class="button" type="button" data-movement-button="d" aria-pressed="false">D</button>
+					</div>
+				</div>
+				<div class="section-block">
+					<h2>FPS test range</h2>
+					<label class="field"><span>Mouse sensitivity <output id="mouse-sensitivity-value">0.94</output></span><input id="mouse-sensitivity" type="range" min="0.1" max="3" step="0.01" value="0.94"></label>
+					<p class="hint">Enter Play after both players are placed. Real mode hides the bot; V exposes all wall and smoke evidence.</p>
+				</div>
+				<div class="section-block">
+					<h2>Map display</h2>
+					<label class="field"><span>Map opacity <output id="map-opacity-value">62%</output></span><input id="map-opacity" type="range" min="0.05" max="1" step="0.01" value="0.62"></label>
+					<div class="inline-actions">
+						<button id="map-focus" class="button primary" type="button" aria-pressed="true">Nearby walls</button>
+						<button id="map-wireframe" class="button" type="button" aria-pressed="false">Wireframe</button>
+						<button id="frame-map" class="button" type="button" disabled>Frame Map</button>
+						<button id="frame-players" class="button" type="button" disabled>Frame Players</button>
+					</div>
+					<p class="hint">These simple gray walls are the exact baked collision mesh, not the textured CS2 map. Green rays are wall-clear; red rays cross baked geometry.</p>
+				</div>
+			</section>
 		</div>
 	</aside>
 
-	<aside id="points-card" class="card points-card floating" aria-labelledby="points-title">
-		<div class="card-header">
-			<div>
-				<p class="eyebrow">Target samples</p>
-				<h2 id="points-title">LOS points</h2>
-			</div>
-			<span id="point-count" class="count-badge">0 points</span>
-		</div>
-		<div class="point-actions">
-			<button id="add-point" class="button" type="button">Add</button>
-			<button id="duplicate-point" class="button" type="button">Duplicate</button>
-			<button id="delete-point" class="button danger" type="button">Delete</button>
-			<button id="reset-points" class="button" type="button">Reset</button>
-		</div>
-		<div id="points-list" class="points-list" role="listbox" aria-label="Editable LOS points"></div>
-		<section class="properties" aria-labelledby="selected-point-title">
-			<h3 id="selected-point-title">Selected point</h3>
-			<label class="field"><span>Name</span><input id="point-name" type="text" autocomplete="off"></label>
-			<div class="grid-3">
-				<label class="field"><span>X</span><input id="point-x" type="number" step="0.25"></label>
-				<label class="field"><span>Y</span><input id="point-y" type="number" step="0.25"></label>
-				<label class="field"><span>Z</span><input id="point-z" type="number" step="0.25"></label>
-			</div>
-		</section>
-	</aside>
-
-	<footer class="status-strip floating" aria-label="Editor status">
-		<div class="metric"><strong id="status-body-count">0</strong><span>body points</span></div>
-		<div class="metric"><strong id="status-aabb-count">8</strong><span>AABB points</span></div>
+	<div id="metrics-hud" class="hud metrics-hud glass" aria-label="Visibility metrics">
+		<div class="metric"><strong id="status-body-count">0</strong><span>points</span></div>
+		<div class="metric"><strong id="status-aabb-count">8</strong><span>AABB</span></div>
+		<div class="metric"><strong id="status-target-count">23</strong><span>targets</span></div>
 		<div class="metric"><strong id="status-ray-count">0</strong><span>rays</span></div>
+		<div class="metric"><strong id="status-origin-count">5</strong><span>origins</span></div>
+		<div class="metric"><strong id="status-ray-result">--</strong><span>clear/blocked</span></div>
+		<div class="metric"><strong id="status-wall-result">No map</strong><span>wall result</span></div>
 		<div class="metric"><strong id="status-muzzle">None</strong><span>muzzle</span></div>
 		<div class="metric"><strong id="status-selected">None</strong><span>selected</span></div>
 		<div class="coordinate-note">Source units · X forward/back · Y left/right · Z up</div>
-		<div id="status" class="status-message" role="status" aria-live="polite">Preparing studio…</div>
-	</footer>
+	</div>
+	<div id="state-hud" class="hud state-hud glass" aria-label="Studio status">
+		<div id="model-status" class="pill" aria-live="polite">Model: checking</div>
+		<div id="self-check" class="pill" role="status" aria-live="polite">Self-check: running</div>
+		<div id="status" class="status-message" role="status" aria-live="polite">Preparing Studio…</div>
+	</div>
 
-	<script type="module" src="./viewer.js?studio=4"></script>
+	<div id="play-hud" class="play-hud" hidden aria-live="polite">
+		<div class="crosshair" aria-hidden="true"></div>
+		<div class="play-card">
+			<div class="label">Visibility gate · <span id="play-bot-count">1/1 bots visible</span></div>
+			<div class="play-gate-line">Bot <span id="play-result" class="play-result visible">Visible</span> · <span id="play-rays">0/0</span> clear/blocked rays · <span id="play-blocker">clear</span></div>
+			<div class="play-gate-meta">Smoke <span id="play-smokes">0</span> · HE <span id="play-hes">0</span> · <span id="play-debug-state">Real</span> · <span id="play-view">First person</span></div>
+			<div id="play-bvh" class="play-bvh">BVH traversal appears in Debug mode.</div>
+		</div>
+		<div class="play-weapon-hud">
+			<div class="play-inventory" aria-label="Weapon inventory">
+				<div id="play-slot-primary" class="inventory-item active"><span>1</span><img id="play-icon-primary" alt=""><span id="play-label-primary">M4A1-S</span></div>
+				<div id="play-slot-secondary" class="inventory-item"><span>2</span><img id="play-icon-secondary" alt=""><span>USP-S</span></div>
+				<div id="play-slot-knife" class="inventory-item"><span>3</span><img id="play-icon-knife" alt=""><span>Karambit</span></div>
+				<div id="play-slot-grenade" class="inventory-item"><span>4</span><img id="play-icon-grenade" alt=""><span id="play-label-grenade">Smoke</span></div>
+			</div>
+		</div>
+		<div id="play-paused" class="play-paused">Click the map to resume</div>
+	</div>
+
+	<script type="module" src="./viewer.js?studio=43"></script>
 </body>
 </html>

@@ -83,8 +83,8 @@ struct split
 class builder
 {
 public:
-	builder(std::span<const triangle> input, bvh8_data &output)
-		: output_(output)
+	builder(std::span<const triangle> input, bvh8_data &output, std::vector<uint32_t> *packet_triangle_sources)
+		: output_(output), packet_triangle_sources_(packet_triangle_sources)
 	{
 		triangles_.reserve(input.size());
 		for (const triangle &item : input)
@@ -101,6 +101,11 @@ public:
 
 	bool run(std::string &error)
 	{
+		if (packet_triangle_sources_ != nullptr)
+		{
+			packet_triangle_sources_->clear();
+			packet_triangle_sources_->reserve(((triangles_.size() + 7u) / 8u) * 8u);
+		}
 		if (triangles_.empty() || triangles_.size() > k_leaf_index_mask)
 		{
 			error = "triangle count is empty or exceeds format limit";
@@ -237,7 +242,8 @@ private:
 		triangle_packet8 packet {};
 		for (uint32_t lane = 0; lane < item.end - item.begin; ++lane)
 		{
-			const triangle &value = triangles_[indices_[item.begin + lane]].geometry;
+			const uint32_t source_index = indices_[item.begin + lane];
+			const triangle &value = triangles_[source_index].geometry;
 			packet.v0_x[lane] = value.v0.x;
 			packet.v0_y[lane] = value.v0.y;
 			packet.v0_z[lane] = value.v0.z;
@@ -247,6 +253,17 @@ private:
 			packet.edge2_x[lane] = value.v2.x - value.v0.x;
 			packet.edge2_y[lane] = value.v2.y - value.v0.y;
 			packet.edge2_z[lane] = value.v2.z - value.v0.z;
+			if (packet_triangle_sources_ != nullptr)
+			{
+				packet_triangle_sources_->push_back(source_index);
+			}
+		}
+		if (packet_triangle_sources_ != nullptr)
+		{
+			for (uint32_t lane = item.end - item.begin; lane < 8u; ++lane)
+			{
+				packet_triangle_sources_->push_back(k_invalid_ref);
+			}
 		}
 		const uint32_t index = static_cast<uint32_t>(output_.packets.size());
 		output_.packets.push_back(packet);
@@ -325,15 +342,17 @@ private:
 	std::vector<build_triangle> triangles_;
 	std::vector<uint32_t> indices_;
 	bvh8_data &output_;
+	std::vector<uint32_t> *packet_triangle_sources_ {};
 	uint32_t max_depth_ {};
 };
 
 } // namespace
 
-bool build_bvh8(std::span<const triangle> triangles, bvh8_data &result, std::string &error)
+bool build_bvh8(std::span<const triangle> triangles, bvh8_data &result, std::string &error,
+	std::vector<uint32_t> *packet_triangle_sources)
 {
 	result = {};
-	builder value(triangles, result);
+	builder value(triangles, result, packet_triangle_sources);
 	return value.run(error);
 }
 

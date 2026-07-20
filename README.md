@@ -112,7 +112,7 @@ Doors, breakable objects, and moving props do not block CS2FOW yet. The baked ma
 <details>
 <summary><strong>How does it avoid enemies appearing too late around corners?</strong></summary>
 
-CS2FOW checks several body points, the corners of the player's box, and the muzzle of their held weapon. It also places viewing points at your eye, shoulders, above your eye, and feet. When you hold W or S, or move diagonally, one extra point follows that direction. The shoulder and movement points reach farther at higher ping, stop at baked walls, and a short visibility hold prevents one-tick flicker.
+CS2FOW checks fifteen points that follow the player's animated bones, the corners of their box, and the muzzle of their held weapon. It also places viewing points at your eye, shoulders, above your eye, and feet. When you hold W or S, or move diagonally, one extra point follows that direction. The shoulder and movement points reach farther at higher ping, stop at baked walls, and a short visibility hold prevents one-tick flicker.
 
 As soon as the background worker finds a clear view again, CS2FOW lets the player's next normal update through.
 
@@ -189,7 +189,7 @@ Live smoke can block those imaginary sight lines too. By default, an HE opens a 
 
 1. **Load the map:** CS2FOW finds the mounted VPK and the physics data inside it.
 2. **Bake the walls:** the baker turns thousands of collision triangles into a compact, quick-to-search map called a BVH8.
-3. **Take a picture:** on the game thread, CS2FOW safely copies each player's position, size, movement buttons, view direction, ping, and held weapon. This recent picture is the snapshot.
+3. **Take a picture:** on the game thread, CS2FOW asks CS2 for each player's current bones, turns them into fifteen body points, and safely copies those points with the player's position, size, movement buttons, view direction, ping, and held weapon. This recent picture is the snapshot. If the bones are unavailable, the old fixed body points are used instead.
 4. **Draw sight lines:** a background worker tests up to six viewing points against the player's current body, box corners, and weapon muzzle.
 5. **Choose visible or hidden:** if even one line gets past both the baked walls and live smoke, the player stays visible.
 6. **Control the outgoing update:** `CheckTransmit`, the server's outgoing entity list, first marks the verified `dont_transmit` bit and then removes the matching primary send bit for each hidden visual entity.
@@ -214,7 +214,7 @@ The worker gets a copy of the numbers, never live CS2 objects. In other words, i
 
 The plugin runs `cfg/cs2fow.cfg` when it loads and again whenever a map starts. Out of the box, wall and smoke filtering are on, teammate filtering is off, and Valve's `sv_enable_donttransmit 0` compatibility mode is used. CS2FOW's paired send-list handling also supports mode `1`.
 
-Think of `cs2fow_status` as the dashboard. It tells you whether CS2FOW is active, why it stepped aside, which map bake is loaded, how long its work takes, how fresh the latest snapshot is, how many player pairs it checked, what smoke and HE handling are doing, whether teammates are filtered, and how an automatic bake is going.
+Think of `cs2fow_status` as the dashboard. It tells you whether CS2FOW is active, why it stepped aside, which map bake is loaded, how long its work takes, how fresh the latest snapshot is, how many player pairs it checked, what smoke and HE handling are doing, whether teammates are filtered, and how an automatic bake is going. The separate `bones` line measures the game-thread time spent asking CS2 for animated body points; that time is already included in `capture`, so do not add the two numbers together.
 
 If you need to see exactly which entity bits CS2FOW removed:
 

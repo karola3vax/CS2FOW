@@ -400,6 +400,31 @@ void test_visibility_sampling()
 	assert(std::fabs(crouched_left_foot.z - 4.0f) < 0.01f);
 	assert(crouched_muzzle.z < 50.0f && crouched_muzzle.z > 45.0f);
 
+	visibility_bone_transform identity {{10.0f, 20.0f, 30.0f}, {0.0f, 0.0f, 0.0f, 1.0f}};
+	vec3 transformed;
+	assert(visibility_transform_body_point(identity, {1.0f, 2.0f, 3.0f}, transformed));
+	assert(std::fabs(transformed.x - 11.0f) < 0.001f && std::fabs(transformed.y - 22.0f) < 0.001f
+		&& std::fabs(transformed.z - 33.0f) < 0.001f);
+	const float half_sqrt_two = std::sqrt(0.5f);
+	visibility_bone_transform quarter_turn {{}, {0.0f, 0.0f, half_sqrt_two, half_sqrt_two}};
+	assert(visibility_transform_body_point(quarter_turn, {1.0f, 0.0f, 0.0f}, transformed));
+	assert(std::fabs(transformed.x) < 0.001f && std::fabs(transformed.y - 1.0f) < 0.001f);
+	visibility_bone_transform invalid_transform {};
+	assert(!visibility_transform_body_point(invalid_transform, {}, transformed));
+
+	target.maxs.z = 72.0f;
+	for (uint32_t point = 0; point < target.body_points.size(); ++point)
+	{
+		target.body_points[point] = {100.0f + static_cast<float>(point), 200.0f, 300.0f};
+	}
+	target.body_point_count = static_cast<uint32_t>(target.body_points.size());
+	const auto animated_targets = visibility_targets(target);
+	assert(animated_targets.count == 24);
+	for (uint32_t point = 0; point < target.body_points.size(); ++point)
+	{
+		assert(animated_targets.points[8 + point].x == target.body_points[point].x);
+	}
+
 	assert(weapon_muzzle_class_from_item_definition(61) == weapon_muzzle_class::pistol);
 	assert(weapon_muzzle_class_from_item_definition(34) == weapon_muzzle_class::smg);
 	assert(weapon_muzzle_class_from_item_definition(7) == weapon_muzzle_class::rifle);
