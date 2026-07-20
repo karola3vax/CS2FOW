@@ -8,6 +8,9 @@
 /tools/vrf/win64/
 /tools/vrf/linux64/
 /tools/visibility_point_editor/local_assets/
+/tools/visibility_point_editor/node_modules/
+/tools/visibility_point_editor/nav_exporter/bin/
+/tools/visibility_point_editor/nav_exporter/obj/
 /tools/debug_viewer/local_assets/
 *.tmp
 *.zip
