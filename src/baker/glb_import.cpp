@@ -11,6 +11,7 @@
 #include <cctype>
 #include <cmath>
 #include <cstring>
+#include <fstream>
 #include <limits>
 #include <string_view>
 
@@ -173,14 +174,27 @@ bool import_physics_glb(const std::filesystem::path &path, std::vector<triangle>
 		triangle_surfaces->clear();
 	}
 	report = {};
+	std::ifstream stream(path, std::ios::binary | std::ios::ate);
+	if (!stream || stream.tellg() < 0)
+	{
+		error = "could not read GLB";
+		return false;
+	}
+	std::vector<std::byte> file(static_cast<size_t>(stream.tellg()));
+	stream.seekg(0);
+	if (!stream.read(reinterpret_cast<char *>(file.data()), static_cast<std::streamsize>(file.size())))
+	{
+		error = "could not read GLB";
+		return false;
+	}
 	cgltf_options options {};
 	cgltf_data *data = nullptr;
-	if (cgltf_parse_file(&options, path.string().c_str(), &data) != cgltf_result_success || data == nullptr)
+	if (cgltf_parse(&options, file.data(), file.size(), &data) != cgltf_result_success || data == nullptr)
 	{
 		error = "could not parse GLB";
 		return false;
 	}
-	if (cgltf_load_buffers(&options, data, path.string().c_str()) != cgltf_result_success || cgltf_validate(data) != cgltf_result_success)
+	if (cgltf_load_buffers(&options, data, nullptr) != cgltf_result_success || cgltf_validate(data) != cgltf_result_success)
 	{
 		error = "GLB buffers or structure are invalid";
 		cgltf_free(data);

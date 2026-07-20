@@ -30,7 +30,7 @@ enum class posix_process_group
 	inherited
 };
 
-bool run_process(const std::filesystem::path &executable, const std::vector<std::string> &arguments,
+bool run_process(const std::filesystem::path &executable, const std::vector<std::filesystem::path> &arguments,
 	std::chrono::milliseconds timeout, const std::atomic_bool *cancel, bool low_priority,
 	posix_process_group process_group, process_result &result, std::string &error);
 bool lower_process_priority(std::string &error);

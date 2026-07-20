@@ -41,7 +41,7 @@ class automatic_baker
 {
 public:
 	~automatic_baker();
-	void start(bake_request request);
+	bool start(bake_request request);
 	void stop();
 	bool poll(bake_completion &completion);
 	bool status(std::string &map, double &elapsed_ms) const;

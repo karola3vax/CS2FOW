@@ -53,11 +53,11 @@ std::string json_escape(const std::string &value)
 	return result;
 }
 
-bool parse_arguments(int argc, char **argv, arguments &result)
+bool parse_arguments(std::span<const std::filesystem::path> argv, arguments &result)
 {
-	for (int i = 1; i < argc; ++i)
+	for (size_t i = 1; i < argv.size(); ++i)
 	{
-		const std::string option = argv[i];
+		const std::string option = argv[i].string();
 		if (option == "--low-priority")
 		{
 			result.low_priority = true;
@@ -66,15 +66,15 @@ bool parse_arguments(int argc, char **argv, arguments &result)
 		{
 			result.list_maps = true;
 		}
-		else if (option == "--inspect-bvh8" && i + 1 < argc)
+		else if (option == "--inspect-bvh8" && i + 1 < argv.size())
 		{
 			result.inspect_bvh8 = argv[++i];
 		}
-		else if ((option == "--game" || option == "--map" || option == "--output" || option == "--vrf" || option == "--vpk" || option == "--debug-obj" || option == "--studio-surfaces") && i + 1 < argc)
+		else if ((option == "--game" || option == "--map" || option == "--output" || option == "--vrf" || option == "--vpk" || option == "--debug-obj" || option == "--studio-surfaces") && i + 1 < argv.size())
 		{
-			const std::string value = argv[++i];
+			const std::filesystem::path value = argv[++i];
 			if (option == "--game") result.game = value;
-			else if (option == "--map") result.map = value;
+			else if (option == "--map") result.map = value.string();
 			else if (option == "--output") result.output = value;
 			else if (option == "--vrf") result.vrf = value;
 			else if (option == "--vpk") result.vpk = value;
@@ -184,7 +184,8 @@ bool write_surface_sidecar(const std::filesystem::path &path, const std::string 
 	write_u64(bytes, 116, bytes.size());
 	std::error_code filesystem_error;
 	if (!path.parent_path().empty()) std::filesystem::create_directories(path.parent_path(), filesystem_error);
-	const std::filesystem::path temporary = path.string() + ".tmp";
+	std::filesystem::path temporary = path;
+	temporary += ".tmp";
 	std::ofstream stream(temporary, std::ios::binary | std::ios::trunc);
 	stream.write(reinterpret_cast<const char *>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
 	stream.close();
@@ -219,7 +220,7 @@ std::filesystem::path vrf_path(const arguments &args)
 #endif
 }
 
-bool invoke_vrf(const arguments &args, const std::vector<std::string> &arguments, std::string &error)
+bool invoke_vrf(const arguments &args, const std::vector<std::filesystem::path> &arguments, std::string &error)
 {
 	process_result result;
 	if (!run_process(vrf_path(args), arguments, std::chrono::minutes(10), nullptr, false,
@@ -263,7 +264,7 @@ bool export_glb(const arguments &args, const std::filesystem::path &vpk, const s
 		return false;
 	}
 	const std::string resource = "maps/" + args.map + "/world_physics.vmdl_c";
-	if (!invoke_vrf(args, {"-i", vpk.string(), "-o", temporary.string(), "--decompile", "--vpk_filepath", resource,
+	if (!invoke_vrf(args, {"-i", vpk, "-o", temporary, "--decompile", "--vpk_filepath", resource,
 		"--gltf_export_format", "glb", "--gltf_export_extras"}, error))
 	{
 		return false;
@@ -345,10 +346,10 @@ bool write_report(const std::filesystem::path &path, const arguments &args, cons
 	return stream.good();
 }
 
-int run(int argc, char **argv)
+int run(std::span<const std::filesystem::path> argv)
 {
 	arguments args;
-	if (!parse_arguments(argc, argv, args))
+	if (!parse_arguments(argv, args))
 	{
 		std::cerr << "usage: cs2fow_baker --game <cs2-root> --map <name> [--vpk <file>] [--low-priority] [--output <file>] [--vrf <path>] [--debug-obj <file>] [--studio-surfaces <file>]\n"
 			<< "       cs2fow_baker --list-maps --vpk <file>\n"
@@ -497,7 +498,17 @@ int run(int argc, char **argv)
 } // namespace
 } // namespace cs2fow
 
-int main(int argc, char **argv)
+template <typename character>
+int run_main(int argc, character **argv)
 {
-	return cs2fow::run(argc, argv);
+	std::vector<std::filesystem::path> arguments;
+	arguments.reserve(static_cast<size_t>(argc));
+	for (int i = 0; i < argc; ++i) arguments.emplace_back(argv[i]);
+	return cs2fow::run(arguments);
 }
+
+#if defined(_WIN32)
+int wmain(int argc, wchar_t **argv) { return run_main(argc, argv); }
+#else
+int main(int argc, char **argv) { return run_main(argc, argv); }
+#endif

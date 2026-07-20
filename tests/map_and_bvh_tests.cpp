@@ -164,7 +164,9 @@ void assert_process_stopped(uint64_t pid)
 	{
 		std::this_thread::sleep_for(std::chrono::milliseconds(10));
 	}
-	assert(!process_alive(pid));
+	const bool alive = process_alive(pid);
+	if (alive) std::fprintf(stderr, "process %llu did not stop\n", static_cast<unsigned long long>(pid));
+	assert(!alive);
 }
 
 void test_vpk(const std::filesystem::path &directory)
@@ -198,6 +200,9 @@ void test_vpk(const std::filesystem::path &directory)
 	assert(candidates.size() == 2u);
 	assert(candidates[0] == logical);
 	assert(candidates[1] == real);
+	const std::vector<std::filesystem::path> dotted_parent = vpk_path_candidates(
+		"vpk:C:\\servers.vpk-backup\\csgo\\pak01.vpk:maps\\de_test.vpk");
+	assert(!dotted_parent.empty() && dotted_parent[0].string() == "C:\\servers.vpk-backup\\csgo\\pak01.vpk");
 	assert(!find_map_source(candidates[0], "aim_redline", source, error));
 	assert(find_map_source(candidates[1], "aim_redline", source, error));
 	assert(source.vpk == real && source.flags == k_bvh8_flag_nested_map_vpk);
@@ -216,7 +221,11 @@ void test_vpk(const std::filesystem::path &directory)
 	std::vector<std::string> maps;
 	assert(list_vpk_maps(embedded, maps, error));
 	assert(maps == std::vector<std::string> {"workshop/123/de_nested"});
+#if defined(_WIN32)
+	const std::filesystem::path extracted = directory / L"embedded-\u6e2c\u8a66-out.vpk";
+#else
 	const std::filesystem::path extracted = directory / "embedded-out.vpk";
+#endif
 	assert(extract_vpk_entry(embedded, entry, extracted, error));
 	assert(read_text_file(extracted) == "prepayload");
 
@@ -258,6 +267,8 @@ void test_vpk(const std::filesystem::path &directory)
 	write_extractable_vpk(invalid_terminator, 2, 0x7fffu, "", "data", 0u);
 	std::vector<vpk_entry> entries;
 	assert(!list_vpk_entries(invalid_terminator, entries, error));
+	assert(!find_map_source(invalid_terminator, "de_test", source, error));
+	assert(error == "malformed VPK entry");
 }
 
 void test_file_crc32(const std::filesystem::path &directory)
@@ -308,6 +319,16 @@ void test_subprocess(const std::filesystem::path &directory, const std::filesyst
 	assert(run_process(spaced_executable, {"--process-probe", "space [test]"}, std::chrono::seconds(5), nullptr, false,
 		posix_process_group::isolated, result, error));
 	assert(result.exit_code == 23);
+	assert(run_process(executable, {"--process-empty", std::filesystem::path {}}, std::chrono::seconds(5), nullptr, false,
+		posix_process_group::isolated, result, error));
+	assert(result.exit_code == 26);
+
+#if defined(_WIN32)
+	const std::filesystem::path unicode_output = directory / L"unicode-\u0131-\u015f-\u011f-\u6e2c\u8a66.txt";
+	assert(run_process(executable, {"--process-touch", unicode_output}, std::chrono::seconds(5), nullptr, false,
+		posix_process_group::isolated, result, error));
+	assert(result.exit_code == 0 && read_text_file(unicode_output) == "touched");
+#endif
 
 	assert(run_process(executable, {"--process-sleep"}, std::chrono::milliseconds(50), nullptr, false,
 		posix_process_group::isolated, result, error));
@@ -326,7 +347,7 @@ void test_subprocess(const std::filesystem::path &directory, const std::filesyst
 	assert(result.output_tail.find("sleep probe") != std::string::npos);
 
 	const std::filesystem::path nested_pid = directory / "nested-timeout.pid";
-	assert(run_process(executable, {"--process-nested", nested_pid.string()}, std::chrono::seconds(1), nullptr, false,
+	assert(run_process(executable, {"--process-nested", nested_pid}, std::chrono::seconds(1), nullptr, false,
 		posix_process_group::isolated, result, error));
 	assert(result.timed_out);
 	assert_process_stopped(output_pid(result.output_tail, "parent-pid="));
@@ -342,7 +363,7 @@ void test_subprocess(const std::filesystem::path &directory, const std::filesyst
 		}
 		cancel.store(true);
 	});
-	assert(run_process(executable, {"--process-nested", cancelled_pid.string()}, std::chrono::seconds(5), &cancel, false,
+	assert(run_process(executable, {"--process-nested", cancelled_pid}, std::chrono::seconds(5), &cancel, false,
 		posix_process_group::isolated, result, error));
 	nested_canceller.join();
 	assert(result.cancelled);
@@ -382,6 +403,11 @@ void test_glb(const std::filesystem::path &directory)
 	assert(import_physics_glb(path, triangles, report, error));
 	assert(triangles.size() == 1 && report.raw_triangles == 1 && report.groups.size() == 1 && report.groups[0].accepted
 		&& report.groups[0].surface_property == "concrete");
+#if defined(_WIN32)
+	const std::filesystem::path unicode_path = directory / L"unicode-\u0131-\u015f-\u011f-\u6e2c\u8a66.glb";
+	write_test_glb(unicode_path, "concrete");
+	assert(import_physics_glb(unicode_path, triangles, report, error));
+#endif
 	assert(physics_group_accepted({}, "") && physics_group_accepted({}, "metal_sheetmetal"));
 	assert(physics_group_accepted({"blocklight", "solid"}, "unknown"));
 	assert(!physics_group_accepted({}, "glass") && !physics_group_accepted({}, "chainlink") && !physics_group_accepted({}, "metalgrate")
@@ -440,9 +466,16 @@ void test_bvh(const std::filesystem::path &directory)
 	std::strcpy(data.header.map_name, "test");
 	data.header.source_crc32 = 1;
 	data.header.source_size = 2;
+#if defined(_WIN32)
+	const std::filesystem::path path = directory / L"test-\u6e2c\u8a66.bvh8";
+#else
 	const std::filesystem::path path = directory / "test.bvh8";
+#endif
 	assert(write_bvh8(path, data, error));
 	bvh8_data loaded;
+	std::atomic_bool cancel_load {true};
+	assert(!load_bvh8(path, loaded, error, &cancel_load));
+	assert(error == "BVH8 load cancelled");
 	assert(load_bvh8(path, loaded, error));
 	assert(loaded.header.version == 3 && loaded.header.bake_recipe_version == 1);
 	assert(loaded.header.triangle_count == triangles.size());

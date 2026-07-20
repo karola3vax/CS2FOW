@@ -142,6 +142,11 @@ void test_smoke_occlusion()
 	assert(smoke_line_blocked(smoke, {-100, 0, 0}, {100, 0, 0}));
 	assert(smoke_line_blocked(smoke, {100, 0, 0}, {-100, 0, 0}));
 	assert(!smoke_line_blocked(smoke, {400, 0, 0}, {500, 0, 0}));
+	volume.center = {-1000, 0, 0};
+	assert(!smoke_line_blocked(smoke, {0, 0, 0}, {100, 0, 0}));
+	volume.center = {1000, 0, 0};
+	assert(!smoke_line_blocked(smoke, {0, 0, 0}, {100, 0, 0}));
+	volume.center = {};
 	const float nan = std::numeric_limits<float>::quiet_NaN();
 	const float infinity = std::numeric_limits<float>::infinity();
 	const float maximum = std::numeric_limits<float>::max();
@@ -460,7 +465,7 @@ void test_visibility_worker()
 	const visibility_tuning tuning {48.0f, 0.4f, 128.0f};
 
 	auto worker = std::make_unique<visibility_worker>();
-	worker->start(&wall);
+	assert(worker->start(&wall));
 	assert(worker->stats().cycles == 0);
 	const auto wait_for = [&](uint64_t sequence)
 	{
@@ -472,47 +477,47 @@ void test_visibility_worker()
 		}
 		return result;
 	};
-	worker->submit(value, 16, tuning);
+	worker->submit(value, 100, tuning);
 	auto result = wait_for(1);
 	assert(result && !result->visible[0][1]);
 
 	value.sequence = 2;
 	value.players[1].eye.x = 16;
 	value.players[1].origin.x = 16;
-	worker->submit(value, 16, tuning);
+	worker->submit(value, 100, tuning);
 	result = wait_for(2);
 	assert(result && result->visible[0][1]);
 
 	value.sequence = 3;
 	value.players[1].eye.x = 64;
 	value.players[1].origin.x = 64;
-	worker->submit(value, 16, tuning);
+	worker->submit(value, 100, tuning);
 	result = wait_for(3);
 	assert(result && result->visible[0][1]);
 
-	std::this_thread::sleep_for(std::chrono::milliseconds(20));
+	std::this_thread::sleep_for(std::chrono::milliseconds(120));
 	value.sequence = 4;
-	worker->submit(value, 16, tuning);
+	worker->submit(value, 100, tuning);
 	result = wait_for(4);
 	assert(result && !result->visible[0][1]);
 	value.players[1].team = 2;
 	value.sequence = 5;
 	value.filter_teammates = false;
-	worker->submit(value, 16, tuning);
+	worker->submit(value, 100, tuning);
 	result = wait_for(5);
 	assert(result && result->visible[0][1] && result->evaluated_pairs == 0 && !result->filter_teammates);
 	value.sequence = 6;
 	value.filter_teammates = true;
-	worker->submit(value, 16, tuning);
+	worker->submit(value, 100, tuning);
 	result = wait_for(6);
 	assert(result && !result->visible[0][1] && result->evaluated_pairs == 2 && result->filter_teammates);
 	assert(worker->stats().cycles == 6);
-	worker->start(&wall);
+	assert(worker->start(&wall));
 	assert(worker->stats().cycles == 0);
 	worker->stop();
 
 	const bvh8_data open = test_world({{{10000, 10000, 10000}, {10001, 10000, 10000}, {10000, 10001, 10000}}});
-	worker->start(&open);
+	assert(worker->start(&open));
 	auto smokes = std::make_shared<smoke_snapshot>();
 	smokes->volumes.emplace_back();
 	smokes->volumes.back().age_seconds = 2.0f;
@@ -873,9 +878,11 @@ double benchmark_worker_loop(const bvh8_data &data, const std::string &label)
 	{
 		const auto start = std::chrono::steady_clock::now();
 		std::array<visibility_origin_points, k_players> origins {};
+		std::array<visibility_target_points, k_players> targets {};
 		for (uint32_t recipient = 0; recipient < k_players; ++recipient)
 		{
 			origins[recipient] = visibility_origins(data, players[recipient], tuning);
+			targets[recipient] = visibility_targets(players[recipient]);
 		}
 		for (uint32_t recipient = 0; recipient < k_players; ++recipient)
 		{
@@ -885,15 +892,15 @@ double benchmark_worker_loop(const bvh8_data &data, const std::string &label)
 				{
 					continue;
 				}
-				const auto targets = visibility_targets(players[target]);
+				const auto &target_points = targets[target];
 				bool blocked = true;
 				uint32_t ray = 0;
 				for (uint32_t origin_index = 0; origin_index < origins[recipient].count; ++origin_index)
 				{
 					const vec3 &origin = origins[recipient].points[origin_index];
-					for (uint32_t point_index = 0; point_index < targets.count; ++point_index)
+					for (uint32_t point_index = 0; point_index < target_points.count; ++point_index)
 					{
-						const vec3 &point = targets.points[point_index];
+						const vec3 &point = target_points.points[point_index];
 						uint32_t &cached = cache[(recipient * k_players + target) * k_visibility_ray_count_max + ray];
 						const ray_hit hit = segment_blocked(data, origin, point, cached);
 						cached = hit.packet_index;

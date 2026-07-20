@@ -83,7 +83,7 @@ float volume_density(const smoke_volume_snapshot &volume, vec3 origin, vec3 targ
 	const vec3 direction {target.x - origin.x, target.y - origin.y, target.z - origin.z};
 	float first = 0.0f;
 	float last = 1.0f;
-	if (!clip_to_volume(volume, origin, direction, first, last))
+	if (!clip_to_volume(volume, origin, direction, first, last) || last < 0.0f || first > 1.0f)
 	{
 		return 0.0f;
 	}
@@ -266,6 +266,14 @@ bool smoke_line_blocked(const smoke_snapshot &snapshot, vec3 origin, vec3 target
 	float total = 0.0f;
 	for (const smoke_volume_snapshot &volume : snapshot.volumes)
 	{
+		const float scale = age_scale(volume.age_seconds + std::max(age_advance_seconds, 0.0f));
+		float first = 0.0f;
+		float last = 1.0f;
+		if (scale <= 0.0f || !clip_to_volume(volume, origin, direction, first, last)
+			|| last < 0.0f || first > 1.0f)
+		{
+			continue;
+		}
 		bool cleared = false;
 		for (uint32_t index = 0; index < snapshot.he_clearance_count && index < snapshot.he_clearances.size(); ++index)
 		{
@@ -280,7 +288,7 @@ bool smoke_line_blocked(const smoke_snapshot &snapshot, vec3 origin, vec3 target
 		{
 			continue;
 		}
-		total += volume_density(volume, origin, target) * age_scale(volume.age_seconds + std::max(age_advance_seconds, 0.0f));
+		total += volume_density(volume, origin, target) * scale;
 		if (total >= k_block_density)
 		{
 			return true;

@@ -122,6 +122,7 @@ struct player_bone_cache
 {
 	CEntityInstance *pawn {};
 	std::array<int32_t, k_visibility_body_point_count> indices {};
+	std::chrono::steady_clock::time_point retry_after {};
 	bool valid {};
 };
 
@@ -222,7 +223,8 @@ private:
 	void record_hidden_entity(CGameEntitySystem *system, size_t member_index, int edict, const visual_entity_group &group,
 		int recipient_slot, hide_reason reason, std::chrono::steady_clock::time_point now);
 	bool capture(visibility_snapshot &value, float game_time);
-	bool capture_animated_body_points(CEntityInstance *pawn, uint32_t slot, player_state &player);
+	bool capture_animated_body_points(CEntityInstance *pawn, uint32_t slot, player_state &player,
+		std::chrono::steady_clock::time_point now);
 	bool capture_smokes(const std::array<CEntityInstance *, k_max_smoke_volumes> &entities, size_t count,
 		bool overflow, float game_time, visibility_snapshot &value);
 	bool teammates_are_enemies() const;

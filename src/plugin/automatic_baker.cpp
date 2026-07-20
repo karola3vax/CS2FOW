@@ -6,6 +6,7 @@
 
 #include "subprocess.h"
 
+#include <system_error>
 #include <vector>
 
 namespace cs2fow
@@ -22,7 +23,7 @@ automatic_baker::~automatic_baker()
 	stop();
 }
 
-void automatic_baker::start(bake_request request)
+bool automatic_baker::start(bake_request request)
 {
 	stop();
 	cancel_.store(false);
@@ -32,7 +33,18 @@ void automatic_baker::start(bake_request request)
 		map_ = request.map;
 		started_ = std::chrono::steady_clock::now();
 	}
-	thread_ = std::thread(&automatic_baker::run, this, std::move(request));
+	try
+	{
+		thread_ = std::thread(&automatic_baker::run, this, std::move(request));
+	}
+	catch (const std::system_error &)
+	{
+		std::lock_guard lock(mutex_);
+		running_ = false;
+		map_.clear();
+		return false;
+	}
+	return true;
 }
 
 void automatic_baker::stop()
@@ -77,12 +89,12 @@ void automatic_baker::run(bake_request request)
 	bake_completion completion;
 	completion.request = request;
 	process_result process;
-	const std::vector<std::string> arguments {
-		"--game", request.game.string(),
+	const std::vector<std::filesystem::path> arguments {
+		"--game", request.game,
 		"--map", request.map,
-		"--vpk", request.source.vpk.string(),
-		"--output", request.output.string(),
-		"--vrf", request.vrf.string(),
+		"--vpk", request.source.vpk,
+		"--output", request.output,
+		"--vrf", request.vrf,
 		"--low-priority"
 	};
 	if (!run_process(request.baker, arguments, k_auto_bake_timeout, &cancel_, true,
@@ -111,8 +123,9 @@ void automatic_baker::run(bake_request request)
 		finish(std::move(completion));
 		return;
 	}
-	if (!load_bvh8(request.output, completion.data, completion.error))
+	if (!load_bvh8(request.output, completion.data, completion.error, &cancel_))
 	{
+		completion.cancelled = cancel_.load();
 		finish(std::move(completion));
 		return;
 	}

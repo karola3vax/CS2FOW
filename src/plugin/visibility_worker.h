@@ -10,6 +10,7 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <chrono>
 #include <condition_variable>
 #include <cmath>
@@ -115,7 +116,7 @@ class visibility_worker
 {
 public:
 	~visibility_worker();
-	void start(const bvh8_data *data);
+	bool start(const bvh8_data *data);
 	void stop();
 	void submit(visibility_snapshot value, uint32_t hold_ms, visibility_tuning tuning);
 	std::shared_ptr<const visibility_result> result() const;
@@ -129,7 +130,7 @@ private:
 	mutable std::mutex mutex_;
 	std::condition_variable condition_;
 	std::optional<visibility_snapshot> pending_;
-	bool stopping_ {true};
+	std::atomic_bool stopping_ {true};
 	uint32_t hold_ms_ {};
 	visibility_tuning tuning_;
 	std::thread thread_;

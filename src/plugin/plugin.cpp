@@ -111,7 +111,7 @@ CConVar<float> cs2fow_he_clear_radius_units("cs2fow_he_clear_radius_units", FCVA
 CConVar<float> cs2fow_he_clear_seconds("cs2fow_he_clear_seconds", FCVAR_NONE, "HE-cleared smoke channel duration", 2.5f,
 	true, 0.0f, true, 10.0f, on_cs2fow_float_changed);
 CConVar<bool> cs2fow_filter_teammates("cs2fow_filter_teammates", FCVAR_NONE, "Apply visibility filtering to teammates", false, on_cs2fow_enable_changed);
-CConVar<int> cs2fow_update_interval_ms("cs2fow_update_interval_ms", FCVAR_NONE, "Visibility worker update interval", 1, true, 1, true, 250);
+CConVar<int> cs2fow_update_interval_ms("cs2fow_update_interval_ms", FCVAR_NONE, "Visibility worker update interval", 1, true, 1, true, 100);
 CConVar<float> cs2fow_shoulder_base_units("cs2fow_shoulder_base_units", FCVAR_NONE, "Minimum sideways shoulder origin distance", 48.0f, true, 0.0f, true, 256.0f);
 CConVar<float> cs2fow_shoulder_rtt_scale("cs2fow_shoulder_rtt_scale", FCVAR_NONE, "Sideways shoulder units per RTT millisecond, applied in 25 ms steps", 0.4f, true, 0.0f, true, 4.0f);
 CConVar<float> cs2fow_max_shoulder_units("cs2fow_max_shoulder_units", FCVAR_NONE, "Maximum sideways shoulder origin distance", 128.0f, true, 0.0f, true, 256.0f);
@@ -540,8 +540,12 @@ void plugin::activate(bvh8_data data)
 	worker_.stop();
 	reset_transmit_state();
 	data_ = std::move(data);
+	if (!worker_.start(&data_))
+	{
+		disable("could not start visibility worker thread");
+		return;
+	}
 	disabled_reason_.clear();
-	worker_.start(&data_);
 	META_CONPRINTF("[CS2FOW] active for %s: crc=0x%08x, triangles=%u, nodes=%u, packets=%u\n", map_.c_str(), data_.header.source_crc32,
 		data_.header.triangle_count, data_.header.node_count, data_.header.packet_count);
 }
@@ -581,7 +585,10 @@ void plugin::start_automatic_bake(const std::string &map, const map_source &sour
 #endif
 	disabled_reason_ = "automatic bake in progress";
 	META_CONPRINTF("[CS2FOW] %s for %s; starting automatic bake\n", reason.c_str(), map.c_str());
-	automatic_baker_.start({map, source, base.parent_path().parent_path(), output, baker, vrf});
+	if (!automatic_baker_.start({map, source, base.parent_path().parent_path(), output, baker, vrf}))
+	{
+		disable("could not start automatic baker thread");
+	}
 }
 
 void plugin::poll_automatic_bake()

@@ -5,6 +5,7 @@
 // and references return errors instead of becoming partially usable data.
 
 #include <array>
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
@@ -113,7 +114,8 @@ uint32_t crc32_extend(uint32_t previous_crc, std::span<const std::byte> bytes);
 bool file_crc32(const std::filesystem::path &path, uint64_t &size, uint32_t &checksum, std::string &error);
 bool cpu_supports_avx();
 bool validate_bvh8(const bvh8_data &data, std::string &error);
-bool load_bvh8(const std::filesystem::path &path, bvh8_data &data, std::string &error);
+bool load_bvh8(const std::filesystem::path &path, bvh8_data &data, std::string &error,
+	const std::atomic_bool *cancel = nullptr);
 bool write_bvh8(const std::filesystem::path &path, bvh8_data &data, std::string &error);
 ray_hit segment_blocked(const bvh8_data &data, vec3 origin, vec3 target, uint32_t cached_packet = k_invalid_ref);
 bool packet_blocks_segment(const triangle_packet8 &packet, uint32_t count, vec3 origin, vec3 target);

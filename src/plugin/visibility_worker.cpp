@@ -5,6 +5,7 @@
 // No function in this file dereferences a live engine object.
 
 #include <algorithm>
+#include <system_error>
 
 namespace cs2fow
 {
@@ -14,7 +15,7 @@ visibility_worker::~visibility_worker()
 	stop();
 }
 
-void visibility_worker::start(const bvh8_data *data)
+bool visibility_worker::start(const bvh8_data *data)
 {
 	stop();
 	data_ = data;
@@ -34,7 +35,17 @@ void visibility_worker::start(const bvh8_data *data)
 		std::lock_guard lock(stats_mutex_);
 		stats_ = {};
 	}
-	thread_ = std::thread(&visibility_worker::run, this);
+	try
+	{
+		thread_ = std::thread(&visibility_worker::run, this);
+	}
+	catch (const std::system_error &)
+	{
+		stopping_.store(true);
+		data_ = nullptr;
+		return false;
+	}
+	return true;
 }
 
 void visibility_worker::stop()
@@ -90,8 +101,8 @@ void visibility_worker::run()
 		visibility_tuning tuning;
 		{
 			std::unique_lock lock(mutex_);
-			condition_.wait(lock, [&] { return stopping_ || pending_.has_value(); });
-			if (stopping_)
+			condition_.wait(lock, [&] { return stopping_.load() || pending_.has_value(); });
+			if (stopping_.load())
 			{
 				return;
 			}
@@ -114,17 +125,22 @@ void visibility_worker::run()
 		const float smoke_age_advance = std::max(0.0f,
 			std::chrono::duration<float>(started - current.captured).count());
 		std::array<visibility_origin_points, k_max_players> recipient_origins {};
+		std::array<visibility_target_points, k_max_players> target_points {};
 		for (uint32_t recipient = 0; recipient < k_max_players; ++recipient)
 		{
+			if (stopping_.load()) return;
 			if (current.players[recipient].valid)
 			{
 				recipient_origins[recipient] = visibility_origins(*data_, sample_player(current.players[recipient]), tuning);
+				target_points[recipient] = visibility_targets(sample_player(current.players[recipient]));
 			}
 		}
 		for (uint32_t recipient = 0; recipient < k_max_players; ++recipient)
 		{
+			if (stopping_.load()) return;
 			for (uint32_t target = 0; target < k_max_players; ++target)
 			{
+				if (stopping_.load()) return;
 				result->visible[recipient][target] = true;
 				const player_state &from = current.players[recipient];
 				const player_state &to = current.players[target];
@@ -135,7 +151,7 @@ void visibility_worker::run()
 				++result->evaluated_pairs;
 				bool blocked = true;
 				const auto &ray_origins = recipient_origins[recipient];
-				const auto ray_targets = visibility_targets(sample_player(to));
+				const auto &ray_targets = target_points[target];
 				uint32_t ray = 0;
 				for (uint32_t origin_index = 0; origin_index < ray_origins.count; ++origin_index)
 				{

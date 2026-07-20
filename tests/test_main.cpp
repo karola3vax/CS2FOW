@@ -15,6 +15,7 @@
 #include <fstream>
 #include <iostream>
 #include <random>
+#include <span>
 #include <thread>
 #include <utility>
 #include <vector>
@@ -41,32 +42,41 @@ uint64_t process_id()
 
 } // namespace
 
-int main(int argc, char **argv)
+int run_tests(std::span<const std::filesystem::path> argv)
 {
-	if (argc == 3 && std::strcmp(argv[1], "--process-probe") == 0)
+	if (argv.size() == 3 && argv[1] == "--process-probe")
 	{
 		std::cout << "probe stdout\n" << std::flush;
 		std::cerr << "probe stderr\n" << std::flush;
-		return std::strcmp(argv[2], "space [test]") == 0 ? 23 : 24;
+		return argv[2] == "space [test]" ? 23 : 24;
 	}
-	if (argc == 2 && std::strcmp(argv[1], "--process-flood") == 0)
+	if (argv.size() == 3 && argv[1] == "--process-empty")
+	{
+		return argv[2].empty() ? 26 : 27;
+	}
+	if (argv.size() == 3 && argv[1] == "--process-touch")
+	{
+		std::ofstream(argv[2]) << "touched";
+		return 0;
+	}
+	if (argv.size() == 2 && argv[1] == "--process-flood")
 	{
 		std::cout << "HEAD-MARKER\n" << std::string(k_process_output_tail_bytes + 1024u, 'x') << "\nTAIL-MARKER\n";
 		return 25;
 	}
-	if (argc == 2 && std::strcmp(argv[1], "--process-sleep") == 0)
+	if (argv.size() == 2 && argv[1] == "--process-sleep")
 	{
 		std::cout << "sleep probe child-pid=" << process_id() << '\n' << std::flush;
 		std::this_thread::sleep_for(std::chrono::seconds(10));
 		return 0;
 	}
-	if (argc == 3 && std::strcmp(argv[1], "--process-sleep-file") == 0)
+	if (argv.size() == 3 && argv[1] == "--process-sleep-file")
 	{
 		std::ofstream(argv[2]) << process_id();
 		std::this_thread::sleep_for(std::chrono::seconds(10));
 		return 0;
 	}
-	if (argc == 3 && std::strcmp(argv[1], "--process-nested") == 0)
+	if (argv.size() == 3 && argv[1] == "--process-nested")
 	{
 		std::cout << "parent-pid=" << process_id() << '\n' << std::flush;
 		process_result result;
@@ -84,14 +94,14 @@ int main(int argc, char **argv)
 	std::filesystem::remove_all(directory);
 	std::cout << "cs2fow_tests: all checks passed\n";
 
-	if (argc != 2)
+	if (argv.size() != 2)
 	{
 		return 0;
 	}
 	bvh8_data data;
 	std::string error;
 	assert(load_bvh8(argv[1], data, error));
-	std::string label = std::filesystem::path(argv[1]).stem().string();
+	std::string label = argv[1].stem().string();
 	if (label.empty()) label = "BVH8";
 	std::mt19937 random(0xb8f8u);
 	std::uniform_real_distribution<float> x(data.header.world_min[0], data.header.world_max[0]);
@@ -131,3 +141,18 @@ int main(int argc, char **argv)
 	assert(run_worker_benchmark(data, label) < 10.0);
 	return 0;
 }
+
+template <typename character>
+int run_main(int argc, character **argv)
+{
+	std::vector<std::filesystem::path> arguments;
+	arguments.reserve(static_cast<size_t>(argc));
+	for (int i = 0; i < argc; ++i) arguments.emplace_back(argv[i]);
+	return run_tests(arguments);
+}
+
+#if defined(_WIN32)
+int wmain(int argc, wchar_t **argv) { return run_main(argc, argv); }
+#else
+int main(int argc, char **argv) { return run_main(argc, argv); }
+#endif

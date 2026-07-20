@@ -28,6 +28,23 @@ namespace
 
 constexpr char k_magic[8] = {'C', 'S', '2', 'F', 'O', 'W', '8', '\0'};
 
+constexpr std::array<uint32_t, 256> make_crc32_table()
+{
+	std::array<uint32_t, 256> table {};
+	for (size_t index = 0; index < table.size(); ++index)
+	{
+		uint32_t entry = static_cast<uint32_t>(index);
+		for (int bit = 0; bit < 8; ++bit)
+		{
+			entry = (entry >> 1u) ^ (0xedb88320u & (0u - (entry & 1u)));
+		}
+		table[index] = entry;
+	}
+	return table;
+}
+
+constexpr auto k_crc32_table = make_crc32_table();
+
 uint64_t align_up(uint64_t value, uint64_t alignment)
 {
 	return (value + alignment - 1u) & ~(alignment - 1u);
@@ -65,10 +82,18 @@ bool finite_bounds(const float *minimum, const float *maximum)
 	return true;
 }
 
-bool read_exact(std::ifstream &stream, void *destination, size_t size)
+bool read_exact(std::ifstream &stream, void *destination, size_t size, const std::atomic_bool *cancel = nullptr)
 {
-	stream.read(static_cast<char *>(destination), static_cast<std::streamsize>(size));
-	return stream.good();
+	constexpr size_t chunk_size = 1024u * 1024u;
+	auto *bytes = static_cast<char *>(destination);
+	for (size_t offset = 0; offset < size; offset += chunk_size)
+	{
+		if (cancel != nullptr && cancel->load()) return false;
+		const size_t count = std::min(chunk_size, size - offset);
+		stream.read(bytes + offset, static_cast<std::streamsize>(count));
+		if (!stream.good()) return false;
+	}
+	return cancel == nullptr || !cancel->load();
 }
 
 template <typename type>
@@ -77,9 +102,19 @@ std::span<const std::byte> bytes_of(const std::vector<type> &values)
 	return {reinterpret_cast<const std::byte *>(values.data()), values.size() * sizeof(type)};
 }
 
-uint32_t payload_crc(const bvh8_data &data)
+bool payload_crc(const bvh8_data &data, uint32_t &checksum, const std::atomic_bool *cancel = nullptr)
 {
-	return crc32_extend(crc32_extend(0, bytes_of(data.nodes)), bytes_of(data.packets));
+	checksum = 0;
+	for (const auto bytes : {bytes_of(data.nodes), bytes_of(data.packets)})
+	{
+		constexpr size_t chunk_size = 1024u * 1024u;
+		for (size_t offset = 0; offset < bytes.size(); offset += chunk_size)
+		{
+			if (cancel != nullptr && cancel->load()) return false;
+			checksum = crc32_extend(checksum, bytes.subspan(offset, std::min(chunk_size, bytes.size() - offset)));
+		}
+	}
+	return cancel == nullptr || !cancel->load();
 }
 
 bool validate_header(const bvh8_header &header, uint64_t actual_size, std::string &error)
@@ -173,11 +208,7 @@ uint32_t crc32_extend(uint32_t previous_crc, std::span<const std::byte> bytes)
 	uint32_t value = ~previous_crc;
 	for (const std::byte byte : bytes)
 	{
-		value ^= static_cast<uint8_t>(byte);
-		for (int bit = 0; bit < 8; ++bit)
-		{
-			value = (value >> 1u) ^ (0xedb88320u & (0u - (value & 1u)));
-		}
+		value = (value >> 8u) ^ k_crc32_table[(value ^ static_cast<uint8_t>(byte)) & 0xffu];
 	}
 	return ~value;
 }
@@ -324,10 +355,18 @@ bool validate_bvh8(const bvh8_data &data, std::string &error)
 	return true;
 }
 
-bool load_bvh8(const std::filesystem::path &path, bvh8_data &data, std::string &error)
+bool load_bvh8(const std::filesystem::path &path, bvh8_data &data, std::string &error,
+	const std::atomic_bool *cancel)
 {
 	error.clear();
 	data = {};
+	const auto cancelled = [&]
+	{
+		if (cancel == nullptr || !cancel->load()) return false;
+		error = "BVH8 load cancelled";
+		data = {};
+		return true;
+	};
 	std::ifstream stream(path, std::ios::binary | std::ios::ate);
 	if (!stream || stream.tellg() < 0)
 	{
@@ -342,6 +381,7 @@ bool load_bvh8(const std::filesystem::path &path, bvh8_data &data, std::string &
 		if (error.empty()) error = "BVH8 file is truncated";
 		return false;
 	}
+	if (cancelled()) return false;
 	try
 	{
 		data.nodes.resize(header.node_count);
@@ -361,22 +401,27 @@ bool load_bvh8(const std::filesystem::path &path, bvh8_data &data, std::string &
 	}
 	data.header = header;
 	stream.seekg(static_cast<std::streamoff>(header.nodes_offset));
-	if (!read_exact(stream, data.nodes.data(), data.nodes.size() * sizeof(bvh8_node)))
+	if (!read_exact(stream, data.nodes.data(), data.nodes.size() * sizeof(bvh8_node), cancel))
 	{
+		if (cancelled()) return false;
 		error = "could not read BVH8 nodes";
 		data = {};
 		return false;
 	}
+	if (cancelled()) return false;
 	stream.seekg(static_cast<std::streamoff>(header.packets_offset));
-	if (!read_exact(stream, data.packets.data(), data.packets.size() * sizeof(triangle_packet8)))
+	if (!read_exact(stream, data.packets.data(), data.packets.size() * sizeof(triangle_packet8), cancel))
 	{
+		if (cancelled()) return false;
 		error = "could not read BVH8 packets";
 		data = {};
 		return false;
 	}
-	if (!validate_bvh8(data, error) || payload_crc(data) != header.payload_crc32)
+	if (cancelled()) return false;
+	uint32_t checksum = 0;
+	if (!validate_bvh8(data, error) || cancelled() || !payload_crc(data, checksum, cancel) || checksum != header.payload_crc32)
 	{
-		if (error.empty()) error = "BVH8 payload CRC mismatch";
+		if (error.empty()) error = cancel != nullptr && cancel->load() ? "BVH8 load cancelled" : "BVH8 payload CRC mismatch";
 		data = {};
 		return false;
 	}
@@ -401,7 +446,11 @@ bool write_bvh8(const std::filesystem::path &path, bvh8_data &data, std::string 
 	data.header.nodes_offset = align_up(sizeof(bvh8_header), 32);
 	data.header.packets_offset = align_up(data.header.nodes_offset + data.nodes.size() * sizeof(bvh8_node), 32);
 	data.header.file_size = data.header.packets_offset + data.packets.size() * sizeof(triangle_packet8);
-	data.header.payload_crc32 = payload_crc(data);
+	if (!payload_crc(data, data.header.payload_crc32))
+	{
+		error = "could not calculate BVH8 payload CRC";
+		return false;
+	}
 	if (!validate_bvh8(data, error))
 	{
 		return false;
@@ -417,7 +466,8 @@ bool write_bvh8(const std::filesystem::path &path, bvh8_data &data, std::string 
 			return false;
 		}
 	}
-	const std::filesystem::path temporary = path.string() + ".tmp";
+	std::filesystem::path temporary = path;
+	temporary += ".tmp";
 	std::ofstream stream(temporary, std::ios::binary | std::ios::trunc);
 	if (!stream)
 	{

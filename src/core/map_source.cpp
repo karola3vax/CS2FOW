@@ -51,7 +51,12 @@ std::vector<std::filesystem::path> vpk_path_candidates(std::string path)
 	{
 		path.erase(0, 4);
 		lower.erase(0, 4);
-		const size_t extension = lower.find(".vpk");
+		size_t extension = lower.find(".vpk");
+		while (extension != std::string::npos && extension + 4u < lower.size()
+			&& lower[extension + 4u] != '/' && lower[extension + 4u] != '\\' && lower[extension + 4u] != ':')
+		{
+			extension = lower.find(".vpk", extension + 4u);
+		}
 		if (extension == std::string::npos)
 		{
 			return {};
@@ -114,20 +119,26 @@ bool find_map_source(const std::filesystem::path &vpk, const std::string &map, m
 		return false;
 	}
 	const std::string physics = "maps/" + map + "/world_physics.vmdl_c";
+	const std::string nested = "maps/" + map + ".vpk";
+	std::vector<vpk_entry> entries;
+	if (!list_vpk_entries(vpk, entries, error))
+	{
+		return false;
+	}
 	vpk_entry entry;
 	std::string direct_error;
-	if (find_vpk_entry(vpk, physics, entry, direct_error))
+	if (find_vpk_entry(std::span<const vpk_entry>(entries), physics, entry, direct_error))
 	{
 		source = {vpk, physics, entry, 0};
 		return true;
 	}
-	const std::string nested = "maps/" + map + ".vpk";
-	if (find_vpk_entry(vpk, nested, entry, error))
+	std::string nested_error;
+	if (find_vpk_entry(std::span<const vpk_entry>(entries), nested, entry, nested_error))
 	{
 		source = {vpk, nested, entry, k_bvh8_flag_nested_map_vpk};
 		return true;
 	}
-	error = direct_error + "; nested map VPK not found";
+	error = direct_error + "; " + nested_error;
 	return false;
 }
 
