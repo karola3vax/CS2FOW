@@ -33,6 +33,13 @@ bool visibility_worker::start(const bvh8_data *data)
 			target.fill(k_invalid_ref);
 		}
 	}
+	for (auto &recipient : cached_occluders_)
+	{
+		for (auto &target : recipient)
+		{
+			target.fill(capsule_occluder_cache {});
+		}
+	}
 	for (auto &recipient : revealed_until_)
 	{
 		recipient.fill(std::chrono::steady_clock::time_point {});
@@ -166,10 +173,11 @@ void visibility_worker::run()
 				{
 					const vec3 &origin = ray_origins.points[origin_index];
 					uint32_t &cached_packet = cached_packets_[recipient][target][origin_index];
+					capsule_occluder_cache &cached_occluders = cached_occluders_[recipient][target][origin_index];
 					capsule_query_stats query_stats;
 					const capsule_query_result capsule_result = capsule_visible_from_origin(*data_, origin,
 						std::span<const visibility_capsule>(to.capsules), active_smokes, smoke_age_advance,
-						deadline, &stopping_, &query_stats);
+						deadline, &stopping_, &query_stats, &cached_occluders);
 					result->sampled_pixels += query_stats.sampled_pixels;
 					result->traced_rays += query_stats.traced_rays;
 					result->visited_nodes += query_stats.visited_nodes;

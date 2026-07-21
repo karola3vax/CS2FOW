@@ -152,6 +152,8 @@ private:
 	std::thread thread_;
 	std::shared_ptr<const visibility_result> published_;
 	std::array<std::array<std::array<uint32_t, k_visibility_origin_count_max>, k_max_players>, k_max_players> cached_packets_ {};
+	std::array<std::array<std::array<capsule_occluder_cache,
+		k_visibility_origin_count_max>, k_max_players>, k_max_players> cached_occluders_ {};
 	std::array<std::array<std::chrono::steady_clock::time_point, k_max_players>, k_max_players> revealed_until_ {};
 	mutable std::mutex stats_mutex_;
 	worker_stats stats_;

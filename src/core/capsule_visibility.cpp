@@ -52,6 +52,12 @@ struct projected_bounds
 	float minimum_depth {};
 };
 
+struct traversal_entry
+{
+	uint32_t ref {};
+	float near_depth {};
+};
+
 enum class map_render_result
 {
 	complete,
@@ -75,6 +81,7 @@ struct occlusion_scratch
 		MaskedOcclusionCulling::Create(MaskedOcclusionCulling::SSE41)};
 	std::vector<float> vertices;
 	std::vector<unsigned int> indices;
+	std::vector<traversal_entry> traversal;
 	std::array<float, k_visibility_pixel_count> pixel_depth {};
 
 	occlusion_scratch()
@@ -84,6 +91,7 @@ struct occlusion_scratch
 			moc->SetResolution(k_visibility_pixel_grid_size, k_visibility_pixel_grid_size);
 			moc->SetNearClipPlane(k_near_depth);
 		}
+		traversal.reserve(512);
 	}
 };
 
@@ -250,7 +258,7 @@ bool build_view(vec3 origin, bounds box, camera_view &view)
 		&& std::isfinite(view.far_depth) && view.far_depth > k_near_depth;
 }
 
-bool box_intersects_view(const camera_view &view, bounds box)
+bool box_intersects_view(const camera_view &view, bounds box, float &near_depth)
 {
 	const vec3 center = scale(add(box.min, box.max), 0.5f);
 	const vec3 extent = scale(subtract(box.max, box.min), 0.5f);
@@ -262,6 +270,7 @@ bool box_intersects_view(const camera_view &view, bounds box)
 	const float depth_radius = radius(view.forward);
 	const float right_radius = radius(view.right);
 	const float up_radius = radius(view.up);
+	near_depth = camera.depth - depth_radius;
 	return camera.depth + depth_radius >= k_near_depth
 		&& camera.depth - depth_radius <= view.far_depth
 		&& view.horizontal * camera.depth + camera.x + view.horizontal * depth_radius + right_radius >= 0.0f
@@ -294,25 +303,129 @@ bool append_clip_triangle(occlusion_scratch &scratch, const camera_view &view,
 map_render_result render_map_moc(const bvh8_data &geometry, const camera_view &view,
 	std::span<const projected_bounds> targets, occlusion_scratch &scratch,
 	std::chrono::steady_clock::time_point deadline, const std::atomic_bool *stopping,
-	capsule_query_stats *stats)
+	capsule_query_stats *stats, capsule_occluder_cache *occluder_cache)
 {
 	if (scratch.moc == nullptr || geometry.nodes.empty())
 	{
 		return map_render_result::failed;
 	}
+	const auto interrupted = [&]
+	{
+		return (stopping != nullptr && stopping->load()) || std::chrono::steady_clock::now() >= deadline;
+	};
+	projected_bounds combined_target;
+	if (!targets.empty())
+	{
+		combined_target = targets.front();
+		for (const projected_bounds &target : targets.subspan(1))
+		{
+			combined_target.minimum_x = std::min(combined_target.minimum_x, target.minimum_x);
+			combined_target.maximum_x = std::max(combined_target.maximum_x, target.maximum_x);
+			combined_target.minimum_y = std::min(combined_target.minimum_y, target.minimum_y);
+			combined_target.maximum_y = std::max(combined_target.maximum_y, target.maximum_y);
+			combined_target.minimum_depth = std::min(combined_target.minimum_depth, target.minimum_depth);
+		}
+	}
+	const auto all_targets_occluded = [&]
+	{
+		if (targets.empty()) return false;
+		constexpr float margin = 1.0e-4f;
+		if (scratch.moc->TestRect(combined_target.minimum_x - margin, combined_target.minimum_y - margin,
+			combined_target.maximum_x + margin, combined_target.maximum_y + margin,
+			combined_target.minimum_depth * (1.0f - margin)) == MaskedOcclusionCulling::OCCLUDED)
+		{
+			return true;
+		}
+		for (const projected_bounds &target : targets)
+		{
+			if (scratch.moc->TestRect(target.minimum_x - margin, target.minimum_y - margin,
+				target.maximum_x + margin, target.maximum_y + margin,
+				target.minimum_depth * (1.0f - margin)) != MaskedOcclusionCulling::OCCLUDED)
+			{
+				return false;
+			}
+		}
+		return true;
+	};
+	const auto append_leaf = [&](uint32_t ref)
+	{
+		if (!is_leaf_ref(ref) || leaf_index(ref) >= geometry.packets.size()) return false;
+		const triangle_packet8 &packet = geometry.packets[leaf_index(ref)];
+		for (uint32_t triangle_index = 0; triangle_index < leaf_count(ref); ++triangle_index)
+		{
+			const vec3 first {packet.v0_x[triangle_index], packet.v0_y[triangle_index], packet.v0_z[triangle_index]};
+			const vec3 second {first.x + packet.edge1_x[triangle_index], first.y + packet.edge1_y[triangle_index],
+				first.z + packet.edge1_z[triangle_index]};
+			const vec3 third {first.x + packet.edge2_x[triangle_index], first.y + packet.edge2_y[triangle_index],
+				first.z + packet.edge2_z[triangle_index]};
+			if (!append_clip_triangle(scratch, view, first, second, third)) return false;
+		}
+		return true;
+	};
+	const auto render_leaves = [&]
+	{
+		if (scratch.indices.empty()) return;
+		const int triangles = static_cast<int>(scratch.indices.size() / 3u);
+		scratch.moc->RenderTriangles(scratch.vertices.data(), scratch.indices.data(), triangles, nullptr,
+			MaskedOcclusionCulling::BACKFACE_NONE, MaskedOcclusionCulling::CLIP_PLANE_ALL);
+		if (stats != nullptr) stats->rasterized_triangles += static_cast<uint32_t>(triangles);
+		scratch.vertices.clear();
+		scratch.indices.clear();
+	};
+
+	scratch.moc->ClearBuffer();
 	scratch.vertices.clear();
 	scratch.indices.clear();
-	std::array<uint32_t, 512> stack {};
-	uint32_t stack_size = 1;
+	if (occluder_cache != nullptr && occluder_cache->count != 0)
+	{
+		for (uint32_t index = 0; index < occluder_cache->count; ++index)
+		{
+			if (!append_leaf(occluder_cache->leaves[index]))
+			{
+				occluder_cache->count = 0;
+				break;
+			}
+		}
+		render_leaves();
+		if (interrupted()) return map_render_result::failed;
+		if (all_targets_occluded()) return map_render_result::target_occluded;
+		scratch.moc->ClearBuffer();
+	}
+
+	capsule_occluder_cache candidate_cache;
+	scratch.traversal.clear();
+	scratch.traversal.push_back({0u, -std::numeric_limits<float>::infinity()});
+	const auto farther_first = [](const traversal_entry &left, const traversal_entry &right)
+	{
+		return left.near_depth > right.near_depth;
+	};
 	uint32_t checked_nodes = 0;
-	while (stack_size != 0)
+	while (!scratch.traversal.empty())
 	{
 		if ((checked_nodes++ & 63u) == 0u
-			&& ((stopping != nullptr && stopping->load()) || std::chrono::steady_clock::now() >= deadline))
+			&& interrupted())
 		{
 			return map_render_result::failed;
 		}
-		const bvh8_node &node = geometry.nodes[stack[--stack_size]];
+		std::pop_heap(scratch.traversal.begin(), scratch.traversal.end(), farther_first);
+		const traversal_entry entry = scratch.traversal.back();
+		scratch.traversal.pop_back();
+		if (is_leaf_ref(entry.ref))
+		{
+			if (!append_leaf(entry.ref)) return map_render_result::failed;
+			render_leaves();
+			if (candidate_cache.count < candidate_cache.leaves.size())
+			{
+				candidate_cache.leaves[candidate_cache.count++] = entry.ref;
+			}
+			if (all_targets_occluded())
+			{
+				if (occluder_cache != nullptr) *occluder_cache = candidate_cache;
+				return map_render_result::target_occluded;
+			}
+			continue;
+		}
+		const bvh8_node &node = geometry.nodes[entry.ref];
 		if (stats != nullptr) ++stats->visited_nodes;
 		for (uint32_t lane = 0; lane < 8; ++lane)
 		{
@@ -320,53 +433,13 @@ map_render_result render_map_moc(const bvh8_data &geometry, const camera_view &v
 			if (ref == k_invalid_ref) continue;
 			const bounds box {{node.min_x[lane], node.min_y[lane], node.min_z[lane]},
 				{node.max_x[lane], node.max_y[lane], node.max_z[lane]}};
-			if (!box_intersects_view(view, box)) continue;
-			if (!is_leaf_ref(ref))
-			{
-				if (stack_size == stack.size()) return map_render_result::failed;
-				stack[stack_size++] = ref;
-				continue;
-			}
-			const triangle_packet8 &packet = geometry.packets[leaf_index(ref)];
-			for (uint32_t triangle_index = 0; triangle_index < leaf_count(ref); ++triangle_index)
-			{
-				const vec3 first {packet.v0_x[triangle_index], packet.v0_y[triangle_index], packet.v0_z[triangle_index]};
-				const vec3 second {first.x + packet.edge1_x[triangle_index], first.y + packet.edge1_y[triangle_index],
-					first.z + packet.edge1_z[triangle_index]};
-				const vec3 third {first.x + packet.edge2_x[triangle_index], first.y + packet.edge2_y[triangle_index],
-					first.z + packet.edge2_z[triangle_index]};
-				if (!append_clip_triangle(scratch, view, first, second, third)) return map_render_result::failed;
-				if (stats != nullptr) ++stats->rasterized_triangles;
-			}
+			float near_depth = 0.0f;
+			if (!box_intersects_view(view, box, near_depth)) continue;
+			scratch.traversal.push_back({ref, near_depth});
+			std::push_heap(scratch.traversal.begin(), scratch.traversal.end(), farther_first);
 		}
 	}
-	scratch.moc->ClearBuffer();
-	constexpr size_t triangles_per_batch = 64;
-	const size_t triangle_count = scratch.indices.size() / 3u;
-	for (size_t first = 0; first < triangle_count; first += triangles_per_batch)
-	{
-		if ((stopping != nullptr && stopping->load()) || std::chrono::steady_clock::now() >= deadline)
-		{
-			return map_render_result::failed;
-		}
-		const size_t count = std::min(triangles_per_batch, triangle_count - first);
-		scratch.moc->RenderTriangles(scratch.vertices.data(),
-			scratch.indices.data() + first * 3u, static_cast<int>(count), nullptr,
-			MaskedOcclusionCulling::BACKFACE_NONE, MaskedOcclusionCulling::CLIP_PLANE_ALL);
-		bool all_occluded = !targets.empty();
-		for (const projected_bounds &target : targets)
-		{
-			constexpr float margin = 1.0e-4f;
-			if (scratch.moc->TestRect(target.minimum_x - margin, target.minimum_y - margin,
-				target.maximum_x + margin, target.maximum_y + margin,
-				target.minimum_depth * (1.0f - margin)) != MaskedOcclusionCulling::OCCLUDED)
-			{
-				all_occluded = false;
-				break;
-			}
-		}
-		if (all_occluded) return map_render_result::target_occluded;
-	}
+	if (occluder_cache != nullptr) occluder_cache->count = 0;
 	return map_render_result::complete;
 }
 
@@ -514,7 +587,8 @@ bool project_bounds(const camera_view &view, bounds box, projected_bounds &resul
 
 capsule_query_result capsule_visible_from_origin(const bvh8_data &geometry, vec3 origin,
 	std::span<const visibility_capsule> capsules, const smoke_snapshot *smokes, float smoke_age_advance,
-	std::chrono::steady_clock::time_point deadline, const std::atomic_bool *stopping, capsule_query_stats *stats)
+	std::chrono::steady_clock::time_point deadline, const std::atomic_bool *stopping, capsule_query_stats *stats,
+	capsule_occluder_cache *occluder_cache)
 {
 	if (capsules.size() != k_visibility_capsule_count)
 	{
@@ -568,7 +642,7 @@ capsule_query_result capsule_visible_from_origin(const bvh8_data &geometry, vec3
 	}
 	thread_local occlusion_scratch scratch;
 	const map_render_result map_result = render_map_moc(geometry, view, projected, scratch,
-		deadline, stopping, stats);
+		deadline, stopping, stats, occluder_cache);
 	if (map_result == map_render_result::target_occluded)
 	{
 		return capsule_query_result::blocked;
@@ -576,6 +650,27 @@ capsule_query_result capsule_visible_from_origin(const bvh8_data &geometry, vec3
 	if (map_result != map_render_result::complete)
 	{
 		return capsule_query_result::indeterminate;
+	}
+	if (smokes == nullptr)
+	{
+		for (size_t index = 0; index < capsules.size(); ++index)
+		{
+			const projected_bounds &capsule_projection = projected[index];
+			constexpr float conservative_margin = 1.0e-4f;
+			if (scratch.moc->TestRect(capsule_projection.minimum_x - conservative_margin,
+				capsule_projection.minimum_y - conservative_margin,
+				capsule_projection.maximum_x + conservative_margin,
+				capsule_projection.maximum_y + conservative_margin,
+				capsule_projection.minimum_depth * (1.0f - conservative_margin))
+				== MaskedOcclusionCulling::OCCLUDED)
+			{
+				continue;
+			}
+			const auto capsule_result = test_capsule_moc(scratch, view, capsules[index]);
+			if (capsule_result == MaskedOcclusionCulling::VISIBLE) return capsule_query_result::visible;
+			if (capsule_result != MaskedOcclusionCulling::OCCLUDED) return capsule_query_result::indeterminate;
+		}
+		return capsule_query_result::blocked;
 	}
 	scratch.moc->ComputePixelDepthBuffer(scratch.pixel_depth.data(), false);
 

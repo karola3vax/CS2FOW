@@ -963,9 +963,9 @@
 	</aside>
 
 	<div id="metrics-hud" class="hud metrics-hud glass" aria-label="Visibility metrics">
-		<div class="metric"><strong id="status-body-count">0</strong><span>points</span></div>
-		<div class="metric"><strong id="status-aabb-count">8</strong><span>AABB</span></div>
-		<div class="metric"><strong id="status-target-count">23</strong><span>targets</span></div>
+		<div class="metric"><strong id="status-body-count">19</strong><span>capsules</span></div>
+		<div class="metric"><strong id="status-aabb-count">15</strong><span>legacy pts</span></div>
+		<div class="metric"><strong id="status-target-count">20</strong><span>runtime parts</span></div>
 		<div class="metric"><strong id="status-ray-count">0</strong><span>rays</span></div>
 		<div class="metric"><strong id="status-origin-count">5</strong><span>origins</span></div>
 		<div class="metric"><strong id="status-ray-result">--</strong><span>clear/blocked</span></div>
@@ -984,7 +984,7 @@
 		<div class="crosshair" aria-hidden="true"></div>
 		<div class="play-card">
 			<div class="label">Visibility gate · <span id="play-bot-count">0/3 bots visible</span></div>
-			<div class="play-gate-line">Bots <span id="play-result" class="play-result">0/3 visible</span> · <span id="play-rays">0/0</span> aggregate clear/blocked rays · <span id="play-blocker">waiting</span></div>
+			<div class="play-gate-line">Bots <span id="play-result" class="play-result">0/3 visible</span> · <span id="play-rays">0/0</span> sampled pixels/exact rays · <span id="play-blocker">waiting</span></div>
 			<div class="play-gate-meta">Smoke <span id="play-smokes">0</span> · HE <span id="play-hes">0</span> · <span id="play-debug-state">Real</span> · <span id="play-view">First person</span></div>
 			<div id="play-bvh" class="play-bvh">BVH traversal appears in Debug mode.</div>
 		</div>
@@ -1002,6 +1002,6 @@
 	<script type="importmap">
 		{"imports":{"three":"./node_modules/three/build/three.module.js","three/addons/":"./node_modules/three/examples/jsm/"}}
 	</script>
-	<script type="module" src="./viewer.js?studio=55"></script>
+	<script type="module" src="./viewer.js?studio=56"></script>
 </body>
 </html>

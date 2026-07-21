@@ -12,7 +12,7 @@ linux-x86_64:
   image: registry.gitlab.steamos.cloud/steamrt/sniper/sdk@sha256:2969e5a47146a6494c01d953cd818b1d62712f42f9e54c4809d7a3aa8dc276ce
   script:
     - apt-get update
-    - apt-get install -y binutils ca-certificates curl g++ git python3 unzip
+    - apt-get install -y binutils ca-certificates curl g++ git nodejs python3 unzip
     - mkdir -p ../references
     - git init ../references/ambuild
     - git -C ../references/ambuild remote add origin https://github.com/alliedmodders/ambuild.git
@@ -39,8 +39,15 @@ linux-x86_64:
     - python3 ../configure.py
     - python3 -c "from ambuild2.run import cli_run; cli_run()"
     - cd ..
-    - ./build-linux/cs2fow_tests/linux-x86_64/cs2fow_tests
+    - ./build-linux/cs2fow_tests/linux-x86_64/cs2fow_tests ./data/maps/de_mirage.bvh8
     - python3 -m unittest -v tests/test_package.py
+    - node --check tools/visibility_point_editor/capsule_visibility.js
+    - node --check tools/visibility_point_editor/bvh8.js
+    - node --check tools/visibility_point_editor/bvh8_worker.js
+    - node --check tools/visibility_point_editor/fps_runtime.js
+    - node --check tools/visibility_point_editor/viewer.js
+    - node tools/visibility_point_editor/check_bvh8.mjs
+    - node tools/visibility_point_editor/check_fps.mjs
     - |
       python3 - <<'PY'
       import re

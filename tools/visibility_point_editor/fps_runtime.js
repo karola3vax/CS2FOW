@@ -2,6 +2,7 @@
 // synthetic smoke inputs, and the same wall/smoke visibility decision as CS2FOW.
 
 import {runtime_origins, BVH8_INVALID_REF} from "./bvh8.js";
+import {capsule_visible_from_origin, VISIBILITY_CAPSULE_FLOATS} from "./capsule_visibility.js";
 
 export const FPS_TICK_RATE = 64;
 export const FPS_DT = 1 / FPS_TICK_RATE;
@@ -719,6 +720,94 @@ export function default_targets(bot, muzzleLength = 0)
 	return values;
 }
 
+function valid_target_set(value)
+{
+	return value && value.capsules instanceof Float32Array
+		&& value.capsules.length === VISIBILITY_CAPSULE_FLOATS
+		&& (value.muzzle == null || value.muzzle instanceof Float32Array && value.muzzle.length === 3);
+}
+
+export function trace_capsule_target(map, viewer, targetSet, options = {})
+{
+	const traversal = options.captureTraversal ? map.create_traversal() : null;
+	const origins = runtime_origins(map, viewer, traversal);
+	const originValues = new Float32Array(origins.length * 3);
+	origins.forEach((origin, index) => originValues.set([origin.x, origin.y, origin.z], index * 3));
+	const rays = [];
+	const blockedRays = [];
+	const stats = {sampledPixels: 0, tracedRays: 0, visitedNodes: 0, rasterizedTriangles: 0};
+	const deadline = Number.isFinite(options.deadline) ? options.deadline : (globalThis.performance?.now?.() ?? Date.now()) + 75;
+	const valid = valid_target_set(targetSet);
+	const muzzle = valid && targetSet.muzzle ? {x: targetSet.muzzle[0], y: targetSet.muzzle[1], z: targetSet.muzzle[2]} : null;
+	const previousCache = options.cache;
+	const previousPackets = previousCache?.packets ?? previousCache;
+	const packets = previousPackets?.length === origins.length
+		? previousPackets : new Uint32Array(origins.length).fill(BVH8_INVALID_REF);
+	const previousOccluders = previousCache?.occluders;
+	const occluders = Array.from({length: origins.length}, (_, index) =>
+		previousOccluders?.length === origins.length && Array.isArray(previousOccluders[index])
+			? previousOccluders[index].slice(0, 8) : []);
+	let rawVisible = !valid;
+	let indeterminate = !valid;
+	let wallBlocked = false;
+	let smokeBlocked = false;
+	for (let originIndex = 0; valid && !rawVisible && originIndex < origins.length; ++originIndex)
+	{
+		const origin = origins[originIndex];
+		const query = capsule_visible_from_origin(map, origin, targetSet.capsules, {
+			deadline,
+			traversal,
+			debug: Boolean(options.debug),
+			smokeActive: Boolean(options.smokeActive),
+			smokeBlocked: options.smokeBlocked,
+			occluderCache: occluders[originIndex]
+		});
+		if (Array.isArray(query.occluderCache)) occluders[originIndex] = query.occluderCache;
+		for (const key of Object.keys(stats)) stats[key] += query.stats[key];
+		if (options.debug)
+		{
+			rays.push(...query.rays);
+			blockedRays.push(...query.blocked);
+		}
+		if (query.result !== "blocked")
+		{
+			rawVisible = true;
+			indeterminate = query.result === "indeterminate";
+			break;
+		}
+		wallBlocked ||= query.reason === "wall";
+		smokeBlocked ||= query.reason === "smoke";
+		if (!muzzle) continue;
+		const wall = map.segment_blocked(origin, muzzle, packets[originIndex], traversal);
+		packets[originIndex] = wall.packet;
+		++stats.tracedRays;
+		const muzzleSmokeBlocked = !wall.blocked && Boolean(options.smokeBlocked?.(origin, muzzle));
+		wallBlocked ||= wall.blocked;
+		smokeBlocked ||= muzzleSmokeBlocked;
+		if (options.debug)
+		{
+			rays.push(origin.x, origin.y, origin.z, muzzle.x, muzzle.y, muzzle.z);
+			blockedRays.push(wall.blocked ? 1 : muzzleSmokeBlocked ? 2 : 0);
+		}
+		if (!wall.blocked && !muzzleSmokeBlocked) rawVisible = true;
+	}
+	const blocked = new Uint8Array(blockedRays);
+	return {
+		origins: originValues,
+		rays: new Float32Array(rays),
+		blocked,
+		clearCount: blocked.reduce((total, value) => total + Number(value === 0), 0),
+		rawVisible,
+		visible: rawVisible,
+		indeterminate,
+		wallBlocked,
+		smokeBlocked,
+		cache: {packets, occluders},
+		...stats,
+		traversal: traversal ? map.finish_traversal(traversal) : null
+	};
+}
+
 function seeded_random(seed)
 {
 	let state = (Number(seed) >>> 0) || 0x9e3779b9;
@@ -763,6 +852,7 @@ export class FpsSimulation
 		while (this.bots.length < 3) this.bots.push(this.spawn_bot());
 		this.botBrains = this.bots.map(make_bot_brain);
 		this.caches = this.bots.map(() => null);
+		this.revealedUntil = this.bots.map(() => 0);
 		this.events = [];
 		this.captureTraversal = false;
 	}
@@ -791,7 +881,7 @@ export class FpsSimulation
 	set_targets(values)
 	{
 		const sets = Array.isArray(values) ? values : [values];
-		this.targetSets = sets.map((value) => value instanceof Float32Array && value.length >= 3 ? value : null);
+		this.targetSets = sets.map((value) => valid_target_set(value) ? value : null);
 	}
 	set_debug(value) { this.debug = Boolean(value); }
 	request_traversal() { this.captureTraversal = true; }
@@ -1021,42 +1111,30 @@ export class FpsSimulation
 		this.smokeCuts = this.smokeCuts.filter((cut) => this.time - cut.time < BULLET_SMOKE_SECONDS);
 	}
 
-	visibility(bot, botIndex, captureTraversal = false)
+	visibility(bot, botIndex, captureTraversal = false, deadline = Infinity)
 	{
-		const targetValues = this.targetSets[botIndex] || default_targets(bot, this.botMuzzleLength);
-		const targets = [];
-		for (let index = 0; index < targetValues.length; index += 3) targets.push({x: targetValues[index], y: targetValues[index + 1], z: targetValues[index + 2]});
-		const traversal = captureTraversal ? this.map.create_traversal() : null;
-		const origins = runtime_origins(this.map, {
+		const result = trace_capsule_target(this.map, {
 			origin: this.player.origin,
 			eye: add(this.player.origin, {x: 0, y: 0, z: this.player.crouched ? 28.5 : 64}),
 			yaw: this.player.yaw,
 			pingMs: this.pingMs,
 			tuning: this.tuning,
 			buttons: this.playerButtons
-		}, traversal);
-		const rayCount = origins.length * targets.length;
-		const previousCache = this.caches[botIndex];
-		const cache = previousCache?.length === rayCount ? previousCache : new Uint32Array(rayCount).fill(BVH8_INVALID_REF);
-		const blocked = new Uint8Array(rayCount);
-		let clearCount = 0;
-		let ray = 0;
-		for (const origin of origins)
-		{
-			for (const target of targets)
-			{
-				const wall = this.map.segment_blocked(origin, target, cache[ray], traversal);
-				cache[ray] = wall.packet;
-				blocked[ray] = wall.blocked ? 1 : smoke_line_blocked(this.map, this.smokes, this.clearances, origin, target, this.time, this.smokeCuts, this.heTuning) ? 2 : 0;
-				clearCount += Number(blocked[ray] === 0);
-				++ray;
-			}
-		}
-		this.caches[botIndex] = cache;
-		const originValues = new Float32Array(origins.length * 3);
-		origins.forEach((origin, index) => originValues.set([origin.x, origin.y, origin.z], index * 3));
-		return {origins: originValues, targets: new Float32Array(targetValues), blocked, clearCount, visible: clearCount > 0,
-			traversal: traversal ? this.map.finish_traversal(traversal) : null};
+		}, this.targetSets[botIndex], {
+			captureTraversal,
+			deadline,
+			cache: this.caches[botIndex],
+			debug: this.debug,
+			smokeActive: this.smokes.length !== 0,
+			smokeBlocked: (origin, target) => smoke_line_blocked(this.map, this.smokes, this.clearances,
+				origin, target, this.time, this.smokeCuts, this.heTuning)
+		});
+		this.caches[botIndex] = result.cache;
+		if (result.rawVisible) this.revealedUntil[botIndex] = this.time + 0.016;
+		result.visible = result.rawVisible || this.time < this.revealedUntil[botIndex];
+		result.held = result.visible && !result.rawVisible;
+		delete result.cache;
+		return result;
 	}
 
 	step()
@@ -1068,7 +1146,8 @@ export class FpsSimulation
 		this.move_grenades();
 		const captureTraversal = this.captureTraversal;
 		this.captureTraversal = false;
-		const visibilities = this.bots.map((bot, index) => this.visibility(bot, index, captureTraversal));
+		const deadline = (globalThis.performance?.now?.() ?? Date.now()) + 75;
+		const visibilities = this.bots.map((bot, index) => this.visibility(bot, index, captureTraversal, deadline));
 		const visibility = visibilities[0];
 		this.bot = this.bots[0];
 		return {

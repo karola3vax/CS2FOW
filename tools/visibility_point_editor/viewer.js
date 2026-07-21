@@ -8,7 +8,7 @@ import {TransformControls} from "three/addons/controls/TransformControls.js";
 import {GLTFLoader} from "three/addons/loaders/GLTFLoader.js";
 import {clone as clone_skeleton} from "three/addons/utils/SkeletonUtils.js";
 import {shoulder_offset} from "./bvh8.js";
-import {default_targets, FPS_CONSTANTS, FPS_DT, target_muzzle, weapon_muzzle_length} from "./fps_runtime.js";
+import {FPS_CONSTANTS, FPS_DT, target_muzzle, weapon_muzzle_length} from "./fps_runtime.js";
 
 const k_source_units_per_meter = 39.3700787;
 const k_default_preset = "default_sas_visibility_points.json";
@@ -272,7 +272,9 @@ let bot_weapon_load_id = 0;
 const extra_bot_models = [];
 const extra_bot_mixers = [];
 const extra_bot_body_bindings = [];
+const extra_bot_capsule_bindings = [];
 const extra_bot_debug_groups = [];
+const extra_bot_capsule_groups = [];
 let player_weapon_model;
 let player_weapon_mount;
 let player_weapon_load_id = 0;
@@ -539,6 +541,8 @@ function apply_player_transforms()
 	marker_group.visible = targetVisible;
 	skeleton_group.visible = targetVisible;
 	hitbox_group.visible = hitbox_capsules_enabled && targetVisible;
+	for (let index = 0; index < extra_bot_capsule_groups.length; ++index)
+		extra_bot_capsule_groups[index].visible = hitbox_capsules_enabled && Boolean(extra_target_poses[index]?.placed);
 	aabb_group.visible = targetVisible;
 	muzzle_group.visible = targetVisible;
 }
@@ -694,34 +698,43 @@ function draw_runtime_rays()
 	}
 }
 
-function runtime_target_values()
+function capsule_values(root, bindings)
 {
-	const targets = runtime_targets().map(three_to_source);
-	const values = new Float32Array(targets.length * 3);
-	targets.forEach((target, index) => values.set([target.x, target.y, target.z], index * 3));
+	if (!root || bindings?.length !== k_valve_hitbox_capsules.length) return new Float32Array();
+	root.updateWorldMatrix(true, true);
+	const values = new Float32Array(bindings.length * 7);
+	for (let index = 0; index < bindings.length; ++index)
+	{
+		const binding = bindings[index];
+		const start = three_to_source(binding.bone.localToWorld(binding.worldStart.copy(binding.localStart)));
+		const end = three_to_source(binding.bone.localToWorld(binding.worldEnd.copy(binding.localEnd)));
+		values.set([start.x, start.y, start.z, end.x, end.y, end.z, binding.radius], index * 7);
+	}
 	return values;
 }
 
-function extra_runtime_target_values(index)
+function muzzle_values(pose, actor)
+{
+	const muzzle = target_muzzle({origin: pose_origin(pose), yaw: pose.yaw, height: pose.height,
+		crouched: Boolean(actor?.crouched)}, weapon_muzzle_length($("bot-weapon-select").value));
+	return muzzle ? new Float32Array([muzzle.x, muzzle.y, muzzle.z]) : null;
+}
+
+function runtime_target_snapshot()
+{
+	return {capsules: capsule_values(model, hitbox_bindings), muzzle: muzzle_values(target_pose, play_state?.bots?.[0])};
+}
+
+function extra_runtime_target_snapshot(index)
 {
 	const pose = play_active ? extra_bot_render_poses[index] : extra_target_poses[index];
-	const actor = play_state?.bots?.[index + 1];
-	const values = default_targets({origin: pose, yaw: pose.yaw, height: pose.height,
-		crouched: Boolean(actor?.crouched)}, weapon_muzzle_length($("bot-weapon-select").value));
-	const bindings = extra_bot_body_bindings[index];
-	const bot = extra_bot_models[index];
-	if (!bot || bindings?.length !== k_runtime_body_bones.length) return values;
-	bot.updateWorldMatrix(true, true);
-	for (let point = 0; point < bindings.length; ++point)
-	{
-		const binding = bindings[point];
-		binding.bone.localToWorld(binding.position.copy(binding.offset));
-		const offset = (point + 8) * 3;
-		values[offset] = binding.position.z * k_source_units_per_meter;
-		values[offset + 1] = binding.position.x * k_source_units_per_meter;
-		values[offset + 2] = binding.position.y * k_source_units_per_meter;
-	}
-	return values;
+	return {capsules: capsule_values(extra_bot_models[index], extra_bot_capsule_bindings[index]),
+		muzzle: muzzle_values(pose, play_state?.bots?.[index + 1])};
+}
+
+function target_transfer_list(targetSets)
+{
+	return targetSets.flatMap((target) => [target.capsules.buffer, ...(target.muzzle ? [target.muzzle.buffer] : [])]);
 }
 
 function request_map_trace()
@@ -737,8 +750,8 @@ function request_map_trace()
 	}
 	trace_dirty = false;
 	trace_in_flight = true;
-	const targetSets = [runtime_target_values(), ...extra_target_poses
-		.map((pose, index) => pose.placed ? extra_runtime_target_values(index) : null).filter(Boolean)];
+	const targetSets = [runtime_target_snapshot(), ...extra_target_poses
+		.map((pose, index) => pose.placed ? extra_runtime_target_snapshot(index) : null).filter(Boolean)];
 	const tuning = runtime_tuning();
 	map_worker.postMessage({
 		type: "trace",
@@ -751,34 +764,31 @@ function request_map_trace()
 			buttons: {...movement_buttons}
 		},
 		targetSets
-	}, targetSets.map((targets) => targets.buffer));
+	}, target_transfer_list(targetSets));
 }
 
-function draw_map_trace(origins, targets, blocked, visible, clearCount)
+function draw_map_trace(origins, rays, blocked, visible, clearCount)
 {
 	const originCount = origins.length / 3;
-	const targetCount = targets.length / 3;
-	ray_count = originCount * targetCount;
+	ray_count = rays.length / 6;
 	clear_ray_count = clearCount;
 	blocked_ray_count = ray_count - clearCount;
 	wall_visible = visible;
 	const positions = new Float32Array(ray_count * 6);
 	const colors = new Float32Array(ray_count * 6);
 	const originPositions = [];
-	let ray = 0;
 	for (let origin = 0; origin < originCount; ++origin)
 	{
 		const sourceOrigin = {x: origins[origin * 3], y: origins[origin * 3 + 1], z: origins[origin * 3 + 2]};
-		const start = source_to_three(sourceOrigin);
-		originPositions.push(start);
-		for (let target = 0; target < targetCount; ++target)
-		{
-			const end = source_to_three({x: targets[target * 3], y: targets[target * 3 + 1], z: targets[target * 3 + 2]});
-			positions.set([start.x, start.y, start.z, end.x, end.y, end.z], ray * 6);
-			const color = blocked[ray] ? k_blocked_ray_color : k_clear_ray_color;
-			colors.set([color.r, color.g, color.b, color.r, color.g, color.b], ray * 6);
-			++ray;
-		}
+		originPositions.push(source_to_three(sourceOrigin));
+	}
+	for (let ray = 0; ray < ray_count; ++ray)
+	{
+		const start = source_to_three({x: rays[ray * 6], y: rays[ray * 6 + 1], z: rays[ray * 6 + 2]});
+		const end = source_to_three({x: rays[ray * 6 + 3], y: rays[ray * 6 + 4], z: rays[ray * 6 + 5]});
+		positions.set([start.x, start.y, start.z, end.x, end.y, end.z], ray * 6);
+		const color = blocked[ray] ? k_blocked_ray_color : k_clear_ray_color;
+		colors.set([color.r, color.g, color.b, color.r, color.g, color.b], ray * 6);
 	}
 	const positionAttribute = ray_lines?.geometry.getAttribute("position");
 	const canReuse = positionAttribute?.array.length === positions.length && origin_group.children.length === originCount;
@@ -827,20 +837,15 @@ function draw_extra_bot_debug(results)
 		clear_group(group);
 		const result = results[index];
 		if (!result) continue;
-		const origins = [...Array(result.origins.length / 3)].map((_, point) => source_to_three({
-			x: result.origins[point * 3], y: result.origins[point * 3 + 1], z: result.origins[point * 3 + 2]
-		}));
-		const targets = [...Array(result.targets.length / 3)].map((_, point) => source_to_three({
-			x: result.targets[point * 3], y: result.targets[point * 3 + 1], z: result.targets[point * 3 + 2]
-		}));
-		const rayPositions = new Float32Array(origins.length * targets.length * 6);
+		const rayPositions = new Float32Array(result.rays.length);
 		const rayColors = new Float32Array(rayPositions.length);
-		let ray = 0;
-		for (const origin of origins) for (const target of targets)
+		for (let ray = 0; ray < result.rays.length / 6; ++ray)
 		{
+			const origin = source_to_three({x: result.rays[ray * 6], y: result.rays[ray * 6 + 1], z: result.rays[ray * 6 + 2]});
+			const target = source_to_three({x: result.rays[ray * 6 + 3], y: result.rays[ray * 6 + 4], z: result.rays[ray * 6 + 5]});
 			rayPositions.set([origin.x, origin.y, origin.z, target.x, target.y, target.z], ray * 6);
 			const color = result.blocked[ray] ? k_blocked_ray_color : k_clear_ray_color;
-			rayColors.set([color.r, color.g, color.b, color.r, color.g, color.b], ray++ * 6);
+			rayColors.set([color.r, color.g, color.b, color.r, color.g, color.b], ray * 6);
 		}
 		const rayGeometry = new THREE.BufferGeometry();
 		rayGeometry.setAttribute("position", new THREE.BufferAttribute(rayPositions, 3));
@@ -851,47 +856,6 @@ function draw_extra_bot_debug(results)
 		rays.renderOrder = 4;
 		queue_extra_debug_interpolation(rays, rayPositions, previousPositions[index][rays.name]);
 		group.add(rays);
-		for (const [name, values, color] of [["debug-aabb-points", targets.slice(0, 8), k_aabb_color],
-			["debug-body-points", targets.slice(8), k_body_color]])
-		{
-			const positions = three_position_array(values);
-			const geometry = new THREE.BufferGeometry();
-			geometry.setAttribute("position", new THREE.BufferAttribute(positions, 3));
-			const markers = new THREE.Points(geometry, new THREE.PointsMaterial({
-				color, size: 0.11, sizeAttenuation: true, transparent: true,
-				opacity: read_number("point-opacity"), depthTest: false
-			}));
-			markers.name = name;
-			markers.renderOrder = 10;
-			queue_extra_debug_interpolation(markers, positions, previousPositions[index][name]);
-			group.add(markers);
-		}
-		if (targets.length >= 23)
-		{
-			const boxVertices = [];
-			for (const [from, to] of k_aabb_edges) boxVertices.push(targets[from], targets[to]);
-			const boxPositions = three_position_array(boxVertices);
-			const boxGeometry = new THREE.BufferGeometry();
-			boxGeometry.setAttribute("position", new THREE.BufferAttribute(boxPositions, 3));
-			const boxLines = new THREE.LineSegments(boxGeometry,
-				new THREE.LineBasicMaterial({color: k_aabb_color, transparent: true, opacity: 0.75}));
-			boxLines.name = "debug-box";
-			boxLines.renderOrder = 8;
-			queue_extra_debug_interpolation(boxLines, boxPositions, previousPositions[index][boxLines.name]);
-			group.add(boxLines);
-			const skeleton = [];
-			for (const [from, to] of k_skeleton_edges) skeleton.push(targets[8 + from], targets[8 + to]);
-			const skeletonPositions = three_position_array(skeleton);
-			const skeletonGeometry = new THREE.BufferGeometry();
-			skeletonGeometry.setAttribute("position", new THREE.BufferAttribute(skeletonPositions, 3));
-			const skeletonLines = new THREE.LineSegments(skeletonGeometry,
-				new THREE.LineBasicMaterial({color: k_body_color, transparent: true,
-					opacity: read_number("point-opacity") * 0.9, depthTest: false}));
-			skeletonLines.name = "debug-skeleton";
-			skeletonLines.renderOrder = 9;
-			queue_extra_debug_interpolation(skeletonLines, skeletonPositions, previousPositions[index][skeletonLines.name]);
-			group.add(skeletonLines);
-		}
 		group.visible = !play_active || play_debug;
 	}
 }
@@ -951,9 +915,9 @@ function update_extra_debug_smoothing(delta)
 	}
 }
 
-function remember_trace_result(origins, targets, visible, clearCount)
+function remember_trace_result(rays, visible, clearCount)
 {
-	ray_count = origins.length / 3 * (targets.length / 3);
+	ray_count = rays.length / 6;
 	clear_ray_count = clearCount;
 	blocked_ray_count = ray_count - clearCount;
 	wall_visible = visible;
@@ -1046,44 +1010,66 @@ function clear_group(group)
 	}
 }
 
+function capsule_bindings_for(root)
+{
+	if (!root) return [];
+	const bones = new Map();
+	root.traverse((node) => bones.set(node.name.toLowerCase(), node));
+	const bindings = k_valve_hitbox_capsules.map(([boneName, start, end, radius]) =>
+	{
+		const bone = bones.get(boneName);
+		return bone ? {bone, radius,
+			localStart: new THREE.Vector3(...start).divideScalar(k_source_units_per_meter),
+			localEnd: new THREE.Vector3(...end).divideScalar(k_source_units_per_meter),
+			worldStart: new THREE.Vector3(), worldEnd: new THREE.Vector3()} : null;
+	});
+	return bindings.every(Boolean) ? bindings : [];
+}
+
+function make_capsule_visual(binding)
+{
+	const geometry = new THREE.CapsuleGeometry(binding.radius / k_source_units_per_meter,
+		binding.localStart.distanceTo(binding.localEnd), 6, 12);
+	const capsule = new THREE.Group();
+	const fill = new THREE.Mesh(geometry, new THREE.MeshBasicMaterial({
+		color: 0xff8a00, transparent: true, opacity: 0.45, depthTest: false, depthWrite: false,
+		side: THREE.DoubleSide
+	}));
+	const outline = new THREE.LineSegments(new THREE.EdgesGeometry(geometry, 15),
+		new THREE.LineBasicMaterial({color: 0x111111, transparent: true, opacity: 0.75, depthTest: false}));
+	fill.renderOrder = 12;
+	outline.renderOrder = 13;
+	capsule.add(fill, outline);
+	binding.capsule = capsule;
+	return capsule;
+}
+
 function rebuild_hitbox_capsules()
 {
 	clear_group(hitbox_group);
-	hitbox_bindings = [];
-	if (!model) return;
-	const bones = new Map();
-	model.traverse((node) => bones.set(node.name.toLowerCase(), node));
-	for (const [boneName, start, end, radius] of k_valve_hitbox_capsules)
+	hitbox_bindings = capsule_bindings_for(model);
+	for (const binding of hitbox_bindings)
 	{
-		const bone = bones.get(boneName);
-		if (!bone) continue;
-		const localStart = new THREE.Vector3(...start).divideScalar(k_source_units_per_meter);
-		const localEnd = new THREE.Vector3(...end).divideScalar(k_source_units_per_meter);
-		const geometry = new THREE.CapsuleGeometry(radius / k_source_units_per_meter,
-			localStart.distanceTo(localEnd), 6, 12);
-		const capsule = new THREE.Group();
-		const fill = new THREE.Mesh(geometry, new THREE.MeshBasicMaterial({
-			color: 0xff8a00, transparent: true, opacity: 0.45, depthTest: false, depthWrite: false,
-			side: THREE.DoubleSide
-		}));
-		const outline = new THREE.LineSegments(new THREE.EdgesGeometry(geometry, 15),
-			new THREE.LineBasicMaterial({color: 0x111111, transparent: true, opacity: 0.75, depthTest: false}));
-		fill.renderOrder = 12;
-		outline.renderOrder = 13;
-		capsule.add(fill, outline);
-		hitbox_group.add(capsule);
-		hitbox_bindings.push({bone, capsule, localStart, localEnd});
+		hitbox_group.add(make_capsule_visual(binding));
 	}
 	update_hitbox_capsules();
 }
 
 function update_hitbox_capsules()
 {
-	if (!model || hitbox_bindings.length === 0) return;
-	model.updateWorldMatrix(true, true);
+	update_capsule_bindings(model, hitbox_bindings);
+	for (let index = 0; index < extra_bot_models.length; ++index)
+		update_capsule_bindings(extra_bot_models[index], extra_bot_capsule_bindings[index]);
+}
+
+function update_capsule_bindings(root, bindings)
+{
+	if (!root || !bindings?.length) return;
+	root.updateWorldMatrix(true, true);
 	const axis = new THREE.Vector3(0, 1, 0);
-	for (const {bone, capsule, localStart, localEnd} of hitbox_bindings)
+	for (const {bone, capsule, localStart, localEnd} of bindings)
 	{
+		if (!capsule) continue;
 		const start = bone.localToWorld(localStart.clone());
 		const end = bone.localToWorld(localEnd.clone());
 		const direction = end.clone().sub(start);
@@ -1195,8 +1181,8 @@ function update_animated_preview()
 		if (now - last_play_target_send >= FPS_DT * 1000)
 		{
 			last_play_target_send = now;
-			const targetSets = [runtime_target_values(), ...extra_bot_models.map((_, index) => extra_runtime_target_values(index))];
-			map_worker.postMessage({type: "play-targets", targetSets}, targetSets.map((targets) => targets.buffer));
+			const targetSets = [runtime_target_snapshot(), ...extra_bot_models.map((_, index) => extra_runtime_target_snapshot(index))];
+			map_worker.postMessage({type: "play-targets", targetSets}, target_transfer_list(targetSets));
 		}
 	}
 	else if (map_metadata)
@@ -1264,9 +1250,9 @@ function update_status()
 	const runtimeWeapon = play_active ? $("bot-weapon-select").value : active_weapon_key;
 	const hasRuntimeMuzzle = weapon_muzzle_length(runtimeWeapon) > 0;
 	const bindingsReady = points.length === k_runtime_body_bones.length && runtime_body_bindings.length === points.length;
-	$("status-body-count").textContent = points.length;
-	$("status-aabb-count").textContent = generated_aabb_points().length;
-	$("status-target-count").textContent = points.length + generated_aabb_points().length + Number(hasRuntimeMuzzle);
+	$("status-body-count").textContent = hitbox_bindings.length;
+	$("status-aabb-count").textContent = points.length;
+	$("status-target-count").textContent = hitbox_bindings.length + Number(hasRuntimeMuzzle);
 	$("status-ray-count").textContent = ray_count;
 	$("status-origin-count").textContent = origin_group?.children.length || (map_metadata ? 0 : stationary_viewer_origins().length);
 	$("status-ray-result").textContent = map_metadata ? `${clear_ray_count}/${blocked_ray_count}` : "--";
@@ -1625,7 +1611,7 @@ async function load_surface_sidecar(mapName)
 
 function init_map_worker()
 {
-	map_worker = new Worker(new URL("./bvh8_worker.js?studio=36", import.meta.url), {type: "module"});
+	map_worker = new Worker(new URL("./bvh8_worker.js?studio=37", import.meta.url), {type: "module"});
 	map_worker.addEventListener("message", (event) =>
 	{
 		const message = event.data;
@@ -1639,7 +1625,7 @@ function init_map_worker()
 			if (map_simulation_ready() && message.results?.length)
 			{
 				const primary = message.results[0];
-				draw_map_trace(primary.origins, primary.targets, primary.blocked, primary.visible, primary.clearCount);
+				draw_map_trace(primary.origins, primary.rays, primary.blocked, primary.visible, primary.clearCount);
 				const now = performance.now() / 1000;
 				if (now - last_extra_debug_draw >= k_debug_draw_interval)
 				{
@@ -2012,6 +1998,7 @@ function update_play_visibility()
 		if (group) group.visible = play_debug;
 	}
 	if (hitbox_group) hitbox_group.visible = hitbox_capsules_enabled && play_debug;
+	for (const group of extra_bot_capsule_groups) group.visible = hitbox_capsules_enabled && play_debug;
 	for (const group of extra_bot_debug_groups)
 	{
 		group.visible = play_debug;
@@ -2729,14 +2716,13 @@ function handle_play_state(state)
 	if (drawDebug)
 	{
 		last_play_debug_draw = state.time;
-		draw_map_trace(state.visibility.origins, state.visibility.targets, state.visibility.blocked,
+		draw_map_trace(state.visibility.origins, state.visibility.rays, state.visibility.blocked,
 			state.visibility.visible, state.visibility.clearCount);
 		draw_extra_bot_debug((state.visibilities || []).slice(1));
 	}
 	else
 	{
-		remember_trace_result(state.visibility.origins, state.visibility.targets,
-			state.visibility.visible, state.visibility.clearCount);
+		remember_trace_result(state.visibility.rays, state.visibility.visible, state.visibility.clearCount);
 	}
 	for (const event of state.events || [])
 	{
@@ -2778,13 +2764,13 @@ function handle_play_state(state)
 	}
 	update_smoke_visuals();
 	const visibilities = state.visibilities || [state.visibility];
-	const totalRays = visibilities.reduce((total, visibility) => total + visibility.blocked.length, 0);
-	const clearRays = visibilities.reduce((total, visibility) => total + visibility.clearCount, 0);
-	$("play-rays").textContent = `${clearRays}/${totalRays - clearRays}`;
-	const blockers = new Set(visibilities.filter((visibility) => !visibility.visible)
-		.flatMap((visibility) => [...visibility.blocked]));
+	const sampledPixels = visibilities.reduce((total, visibility) => total + visibility.sampledPixels, 0);
+	const tracedRays = visibilities.reduce((total, visibility) => total + visibility.tracedRays, 0);
+	$("play-rays").textContent = `${sampledPixels}/${tracedRays}`;
+	const hidden = visibilities.filter((visibility) => !visibility.visible);
 	$("play-blocker").textContent = visibilities.every((visibility) => visibility.visible) ? "clear"
-		: blockers.has(1) && blockers.has(2) ? "wall + smoke" : blockers.has(2) ? "smoke" : "wall";
+		: hidden.some((visibility) => visibility.wallBlocked) && hidden.some((visibility) => visibility.smokeBlocked)
+			? "wall + smoke" : hidden.some((visibility) => visibility.smokeBlocked) ? "smoke" : "wall";
 	$("play-smokes").textContent = state.smokeCount;
 	$("play-hes").textContent = state.heCount;
 	const visibleBots = visibilities.filter((visibility) => visibility.visible).length;
@@ -3282,6 +3268,8 @@ function clear_extra_bots()
 	extra_bot_models.length = 0;
 	extra_bot_mixers.length = 0;
 	extra_bot_body_bindings.length = 0;
+	extra_bot_capsule_bindings.length = 0;
+	for (const group of extra_bot_capsule_groups) clear_group(group);
 }
 
 function create_extra_bots()
@@ -3309,11 +3297,15 @@ function create_extra_bots()
 			return bone ? {bone, offset: binding.offset.clone(), position: new THREE.Vector3()} : null;
 		});
 		extra_bot_body_bindings.push(bindings.length === k_runtime_body_bones.length && bindings.every(Boolean) ? bindings : []);
+		const capsuleBindings = capsule_bindings_for(bot);
+		extra_bot_capsule_bindings.push(capsuleBindings);
+		for (const binding of capsuleBindings) extra_bot_capsule_groups[index].add(make_capsule_visual(binding));
 		const mixer = new THREE.AnimationMixer(bot);
 		extra_bot_mixers.push(mixer);
 		choose_bot_animation({velocity: {x: 0, y: 0, z: 0}, speed: 0, grounded: true, crouched: false, yaw: extra_target_poses[index].yaw}, mixer);
 	}
 	if (bot_weapon_mount) bot_weapon_mount.visible = weaponWasVisible;
+	update_hitbox_capsules();
 }
 
 async function load_bot_weapon(key)
@@ -4749,9 +4741,13 @@ function init_scene()
 	smoke_group = new THREE.Group();
 	grenade_group = new THREE.Group();
 	effect_group = new THREE.Group();
-	for (let index = 0; index < 2; ++index) extra_bot_debug_groups.push(new THREE.Group());
+	for (let index = 0; index < 2; ++index)
+	{
+		extra_bot_debug_groups.push(new THREE.Group());
+		extra_bot_capsule_groups.push(new THREE.Group());
+	}
 	scene.add(ray_group, origin_group, aabb_group, skeleton_group, marker_group, muzzle_group, hitbox_group,
-		nav_group, smoke_group, grenade_group, effect_group, ...extra_bot_debug_groups);
+		nav_group, smoke_group, grenade_group, effect_group, ...extra_bot_debug_groups, ...extra_bot_capsule_groups);
 	scene.add(new THREE.HemisphereLight(0xffffff, 0xc9cdd2, 2.4));
 	const key_light = new THREE.DirectionalLight(0xffffff, 3.2);
 	key_light.position.set(4, 9, 6);

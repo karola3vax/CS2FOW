@@ -1,5 +1,5 @@
-import {Bvh8Map, Bvh8SurfaceMap, trace_runtime_rays} from "./bvh8.js";
-import {FpsSimulation, FPS_TICK_RATE} from "./fps_runtime.js";
+import {Bvh8Map, Bvh8SurfaceMap} from "./bvh8.js";
+import {FpsSimulation, FPS_TICK_RATE, trace_capsule_target} from "./fps_runtime.js";
 
 let map = null;
 let cachedPackets = null;
@@ -26,7 +26,7 @@ function publish_simulation()
 		const transfer = [];
 		for (const visibility of state.visibilities)
 		{
-			transfer.push(visibility.origins.buffer, visibility.targets.buffer, visibility.blocked.buffer);
+			transfer.push(visibility.origins.buffer, visibility.rays.buffer, visibility.blocked.buffer);
 			if (visibility.traversal)
 			{
 				visibility.traversal.positions = map.triangle_positions_for(visibility.traversal.triangles, unitsPerMeter);
@@ -71,16 +71,19 @@ self.addEventListener("message", (event) =>
 		{
 			const targetSets = message.targetSets || [message.targets];
 			const caches = Array.isArray(cachedPackets) ? cachedPackets : [];
-			const results = targetSets.map((targets, index) => trace_runtime_rays(map, message.viewer, targets, caches[index]));
+			const deadline = (globalThis.performance?.now?.() ?? Date.now()) + 75;
+			const results = targetSets.map((target, index) => trace_capsule_target(map, message.viewer, target,
+				{cache: caches[index], deadline, debug: true}));
 			cachedPackets = results.map((result) => result.cache);
 			const transfer = [];
-			for (let index = 0; index < results.length; ++index)
-				transfer.push(results[index].origins.buffer, targetSets[index].buffer, results[index].blocked.buffer);
+			for (const result of results)
+			{
+				delete result.cache;
+				transfer.push(result.origins.buffer, result.rays.buffer, result.blocked.buffer);
+			}
 			self.postMessage({
 				type: "traced",
-				id: message.id,
-				results: results.map((result, index) => ({origins: result.origins, targets: targetSets[index], blocked: result.blocked,
-					clearCount: result.clearCount, visible: result.visible}))
+				id: message.id, results
 			}, transfer);
 		}
 		else if (message.type === "pick" && map)

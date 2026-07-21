@@ -562,6 +562,119 @@ export class Bvh8Map
 		}
 		return true;
 	}
+
+	for_each_packet_triangle(packet, callback, traversal = null)
+	{
+		if (!Number.isInteger(packet) || packet < 0 || packet >= this.packetCount) return false;
+		if (traversal)
+		{
+			++traversal.packetTests;
+			traversal.packets.add(packet);
+		}
+		for (let lane = 0; lane < this.packetTriangleCounts[packet]; ++lane)
+		{
+			if (traversal)
+			{
+				++traversal.triangleTests;
+				traversal.triangles.add(this.packetTriangleOffsets[packet] + lane);
+			}
+			if (callback(packet, lane, this.triangle(packet, lane)) === false) return false;
+		}
+		return true;
+	}
+
+	for_each_triangle_in_view(view, callback, traversal = null, stats = null, afterLeaf = null)
+	{
+		const radius = (axis, extent) => Math.abs(axis.x) * extent.x
+			+ Math.abs(axis.y) * extent.y + Math.abs(axis.z) * extent.z;
+		const intersects = (node, lane) =>
+		{
+			const base = node * k_node_float_count;
+			const minimum = {x: this.nodeFloats[base + lane], y: this.nodeFloats[base + 8 + lane],
+				z: this.nodeFloats[base + 16 + lane]};
+			const maximum = {x: this.nodeFloats[base + 24 + lane], y: this.nodeFloats[base + 32 + lane],
+				z: this.nodeFloats[base + 40 + lane]};
+			const center = scale(add(minimum, maximum), 0.5);
+			const extent = scale(subtract(maximum, minimum), 0.5);
+			const offset = subtract(center, view.origin);
+			const depth = offset.x * view.forward.x + offset.y * view.forward.y + offset.z * view.forward.z;
+			const x = offset.x * view.right.x + offset.y * view.right.y + offset.z * view.right.z;
+			const y = offset.x * view.up.x + offset.y * view.up.y + offset.z * view.up.z;
+			const depthRadius = radius(view.forward, extent);
+			const rightRadius = radius(view.right, extent);
+			const upRadius = radius(view.up, extent);
+			return depth + depthRadius >= view.nearDepth && depth - depthRadius <= view.farDepth
+				&& view.horizontal * depth + x + view.horizontal * depthRadius + rightRadius >= 0
+				&& view.horizontal * depth - x + view.horizontal * depthRadius + rightRadius >= 0
+				&& view.vertical * depth + y + view.vertical * depthRadius + upRadius >= 0
+				&& view.vertical * depth - y + view.vertical * depthRadius + upRadius >= 0
+				? depth - depthRadius : null;
+		};
+		const queue = [];
+		const push = (entry) =>
+		{
+			let index = queue.length;
+			queue.push(entry);
+			while (index > 0)
+			{
+				const parent = (index - 1) >> 1;
+				if (queue[parent].nearDepth <= entry.nearDepth) break;
+				queue[index] = queue[parent];
+				index = parent;
+			}
+			queue[index] = entry;
+		};
+		const pop = () =>
+		{
+			const result = queue[0];
+			const last = queue.pop();
+			if (queue.length)
+			{
+				let index = 0;
+				while (index * 2 + 1 < queue.length)
+				{
+					let child = index * 2 + 1;
+					if (child + 1 < queue.length && queue[child + 1].nearDepth < queue[child].nearDepth) ++child;
+					if (queue[child].nearDepth >= last.nearDepth) break;
+					queue[index] = queue[child];
+					index = child;
+				}
+				queue[index] = last;
+			}
+			return result;
+		};
+		push({reference: 0, nearDepth: -Infinity});
+		while (queue.length)
+		{
+			const {reference} = pop();
+			if (is_leaf(reference))
+			{
+				const packet = leaf_index(reference);
+				if (!this.for_each_packet_triangle(packet, callback, traversal)) return false;
+				if (afterLeaf?.(packet) === false) return false;
+				continue;
+			}
+			const node = reference;
+			if (stats) ++stats.visitedNodes;
+			if (traversal)
+			{
+				++traversal.nodeVisits;
+				traversal.nodes.add(node);
+			}
+			const base = node * k_node_float_count;
+			for (let lane = 0; lane < 8; ++lane)
+			{
+				const reference = this.nodeRefs[base + 48 + lane];
+				if (reference === BVH8_INVALID_REF) continue;
+				if (traversal) ++traversal.boundsTests;
+				const nearDepth = intersects(node, lane);
+				if (nearDepth === null) continue;
+				if (traversal) ++traversal.boundsHits;
+				push({reference, nearDepth});
+			}
+		}
+		return true;
+	}
 }
 
 export class Bvh8SurfaceMap

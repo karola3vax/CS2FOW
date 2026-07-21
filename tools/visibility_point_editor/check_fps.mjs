@@ -4,6 +4,7 @@ import {
 	default_targets, FPS_CONSTANTS, FPS_DT, FpsSimulation, make_test_smoke, move_actor,
 	resolve_capsule, route_between, smoke_line_blocked, target_muzzle, validate_nav, weapon_muzzle_length
 } from "./fps_runtime.js";
+import {capsule_visible_from_origin} from "./capsule_visibility.js";
 
 const floor = {
 	v0: {x: -1000, y: -1000, z: 0},
@@ -20,9 +21,27 @@ function test_map(triangles = [])
 {
 	return {
 		metadata: {mapName: "test", worldMin: [-2000, -2000, -2000], worldMax: [2000, 2000, 2000]},
+		packetCount: triangles.length,
 		for_each_triangle_in_bounds(_minimum, _maximum, callback)
 		{
 			triangles.forEach((triangle, index) => callback(index, 0, triangle));
+		},
+		for_each_packet_triangle(packet, callback, traversal)
+		{
+			if (!Number.isInteger(packet) || packet < 0 || packet >= triangles.length) return false;
+			if (traversal) traversal.triangles.add(packet);
+			return callback(packet, 0, triangles[packet]) !== false;
+		},
+		for_each_triangle_in_view(_view, callback, traversal, stats, afterLeaf)
+		{
+			if (traversal) ++traversal.nodeVisits;
+			if (stats) ++stats.visitedNodes;
+			triangles.forEach((triangle, index) =>
+			{
+				if (traversal) traversal.triangles.add(index);
+				if (callback(index, 0, triangle) !== false) afterLeaf?.(index);
+			});
+			return true;
 		},
 		segment_hit(start, end)
 		{
@@ -42,8 +61,9 @@ function test_map(triangles = [])
 			if (traversal) ++traversal.triangleTests;
 			return {blocked: false, packet: 0xffffffff};
 		},
-		create_traversal() { return {triangleTests: 0}; },
-		finish_traversal(value) { return {triangles: new Uint32Array(), testedTriangles: value.triangleTests}; },
+		create_traversal() { return {nodes: new Set(), packets: new Set(), triangles: new Set(), nodeVisits: 0,
+			triangleTests: 0, boundsTests: 0, boundsHits: 0, packetTests: 0, cacheTests: 0, cacheHits: 0}; },
+		finish_traversal(value) { return {triangles: new Uint32Array(value.triangles), testedTriangles: value.triangleTests}; },
 		surfaceMap: {name: () => "metal_auto"}
 	};
 }
@@ -55,6 +75,44 @@ function actor(origin = {x: 64, y: 0, z: 0.02})
 		grounded: true, crouched: false, lastSafe: {...origin}, surface: "default", stance: "standing", speed: 0
 	};
 }
+
+function capsule_target(origin, muzzleLength = 36)
+{
+	const capsules = new Float32Array(19 * 7);
+	for (let index = 0; index < 19; ++index)
+	{
+		const x = origin.x + (index % 3 - 1) * 4;
+		const y = origin.y + (Math.floor(index / 3) % 3 - 1) * 4;
+		const z = origin.z + 8 + index * 2.5;
+		capsules.set([x, y, z, x, y, z + 8, 3], index * 7);
+	}
+	const muzzle = target_muzzle({origin, yaw: 180, crouched: false}, muzzleLength);
+	return {capsules, muzzle: muzzle ? new Float32Array([muzzle.x, muzzle.y, muzzle.z]) : null};
+}
+
+const capsuleOrigin = {x: 0, y: 0, z: 40};
+const capsuleSet = capsule_target({x: 100, y: 0, z: 0}, 0).capsules;
+const openCapsuleResult = capsule_visible_from_origin(test_map(), capsuleOrigin, capsuleSet);
+assert.equal(openCapsuleResult.result, "visible",
+	"an unobstructed animated capsule volume must be visible");
+assert.equal(openCapsuleResult.stats.sampledPixels, 0, "the runtime does not sample pixels without active smoke");
+assert.equal(capsule_visible_from_origin(test_map(), capsuleOrigin, new Float32Array(7)).result, "indeterminate",
+	"an incomplete capsule snapshot must fail open");
+const occludingWall = [
+	{v0: {x: 50, y: -200, z: -200}, v1: {x: 50, y: 200, z: -200}, v2: {x: 50, y: 200, z: 200}},
+	{v0: {x: 50, y: -200, z: -200}, v1: {x: 50, y: 200, z: 200}, v2: {x: 50, y: -200, z: 200}}
+];
+const wallResult = capsule_visible_from_origin(test_map(occludingWall), capsuleOrigin, capsuleSet);
+assert.equal(wallResult.result, "blocked", "a complete wall must occlude the full capsule silhouette");
+assert.equal(wallResult.reason, "wall");
+assert.ok(wallResult.occluderCache.length > 0, "a proven wall should populate the runtime occluder cache");
+const warmWallResult = capsule_visible_from_origin(test_map(occludingWall), capsuleOrigin, capsuleSet,
+	{occluderCache: wallResult.occluderCache});
+assert.equal(warmWallResult.result, "blocked");
+assert.equal(warmWallResult.stats.visitedNodes, 0, "a warm wall cache should avoid the full BVH traversal");
+const smokeResult = capsule_visible_from_origin(test_map(), capsuleOrigin, capsuleSet, {smokeBlocked: () => true});
+assert.equal(smokeResult.result, "blocked", "smoke must test the exact geometry-clear capsule rays");
+assert.equal(smokeResult.reason, "smoke");
 
 assert.equal(FPS_DT, 1 / 64);
 assert.deepEqual(
@@ -194,11 +252,12 @@ const seededSettings = {
 assert.deepEqual(new FpsSimulation(openMap, seededSettings).bots.map((bot) => bot.yaw),
 	new FpsSimulation(openMap, seededSettings).bots.map((bot) => bot.yaw), "bot simulation seed must reproduce random choices");
 const animatedTargetSimulation = new FpsSimulation(openMap, seededSettings);
-const animatedTargetSets = animatedTargetSimulation.bots.map((_, index) => new Float32Array([index + 1, index + 2, index + 3]));
+const animatedTargetSets = animatedTargetSimulation.bots.map((bot) => capsule_target(bot.origin));
 animatedTargetSimulation.set_targets(animatedTargetSets);
 for (let index = 0; index < animatedTargetSets.length; ++index)
-	assert.deepEqual(animatedTargetSimulation.visibility(animatedTargetSimulation.bots[index], index).targets,
-		animatedTargetSets[index], `bot ${index + 1} must use its animated target set`);
+	assert.equal(animatedTargetSimulation.targetSets[index], animatedTargetSets[index], `bot ${index + 1} must use its animated capsule set`);
+simulation.set_targets(simulation.bots.map((bot) => capsule_target(bot.origin)));
+simulation.set_debug(true);
 simulation.set_input({w: true, a: true});
 const state = simulation.step();
 assert.equal(state.bots.length, 3, "Play should simulate three terrorist bots");
@@ -211,10 +270,10 @@ for (let left = 0; left < state.bots.length; ++left)
 			state.bots[left].origin.y - state.bots[right].origin.y) >= 1000,
 		"extra bot spawns should be separated by at least 1000 units");
 assert.equal(state.visibility.origins.length / 3, 6);
-assert.equal(state.visibility.targets.length / 3, 24);
-assert.equal(state.visibility.blocked.length, 144);
-assert.ok(state.visibilities.every((visibility) => visibility.targets.length / 3 === 24),
-	"every armed bot needs the native muzzle target");
+assert.ok(state.visibilities.every((visibility) => visibility.sampledPixels === 0 && visibility.tracedRays === 0),
+	"the no-smoke path must use the runtime's direct capsule test");
+assert.ok(state.visibilities.every((visibility) => visibility.rays.length === 0 && visibility.blocked.length === 0),
+	"debug output must not invent exact rays when the runtime did not trace any");
 simulation.player.crouched = true;
 const crouchedVisibility = simulation.visibility(simulation.bot, 0);
 assert.ok(Math.abs(crouchedVisibility.origins[2] - (simulation.player.origin.z + 28.5)) < 0.001,

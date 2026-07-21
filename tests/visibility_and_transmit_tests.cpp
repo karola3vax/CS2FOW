@@ -432,8 +432,23 @@ void test_capsule_visibility()
 		{{32, -100, -100}, {32, 100, -100}, {32, -100, 100}},
 		{{32, 100, 100}, {32, -100, 100}, {32, 100, -100}}
 	});
-	assert(capsule_visible_from_origin(wall, viewer, target.capsules, nullptr, 0.0f, deadline)
+	capsule_occluder_cache cache;
+	capsule_query_stats cold_stats;
+	assert(capsule_visible_from_origin(wall, viewer, target.capsules, nullptr, 0.0f, deadline,
+		nullptr, &cold_stats, &cache)
 		== capsule_query_result::blocked);
+	assert(cache.count != 0 && cold_stats.visited_nodes != 0);
+	capsule_query_stats warm_stats;
+	assert(capsule_visible_from_origin(wall, viewer, target.capsules, nullptr, 0.0f, deadline,
+		nullptr, &warm_stats, &cache) == capsule_query_result::blocked);
+	assert(warm_stats.visited_nodes == 0 && warm_stats.rasterized_triangles <= cold_stats.rasterized_triangles);
+	target.origin.x = 16.0f;
+	set_test_capsules(target);
+	assert(capsule_visible_from_origin(wall, viewer, target.capsules, nullptr, 0.0f, deadline,
+		nullptr, nullptr, &cache) == capsule_query_result::visible);
+	assert(cache.count == 0);
+	target.origin.x = 64.0f;
+	set_test_capsules(target);
 
 	const bvh8_data half_wall = test_world({
 		{{32, -100, -100}, {32, 100, -100}, {32, -100, 35}},
@@ -840,6 +855,82 @@ void test_hidden_entity_group()
 
 double benchmark_worker_loop(const bvh8_data &data, const std::string &label)
 {
+	if (label == "de_mirage")
+	{
+		constexpr uint32_t team_size = 5;
+		constexpr uint32_t player_count = team_size * 2u;
+		constexpr uint32_t pair_count = team_size * team_size * 2u;
+		const visibility_tuning blocked_tuning {48.0f, 0.4f, 128.0f};
+		std::array<visibility_player, player_count> blocked_players {};
+		for (uint32_t index = 0; index < player_count; ++index)
+		{
+			const bool first_team = index < team_size;
+			const float offset = static_cast<float>(static_cast<int>(index % team_size) - 2) * 12.0f;
+			const vec3 origin = first_team ? vec3 {-1902.0f + offset, -1976.0f, -212.14798f}
+				: vec3 {1376.0f + offset, -16.0f, -103.96875f};
+			blocked_players[index] = {{origin.x, origin.y, origin.z + 64.0f}, origin,
+				{-16.0f, -16.0f, 0.0f}, {16.0f, 16.0f, 72.0f}, 0.0f, 0.0f,
+				k_visibility_button_forward, weapon_muzzle_class::rifle};
+			set_test_capsules(blocked_players[index]);
+		}
+		std::array<visibility_origin_points, player_count> blocked_origins {};
+		std::array<capsule_occluder_cache, pair_count * k_visibility_origin_count_max> blocked_cache {};
+		std::array<double, 20> blocked_timings {};
+		uint64_t blocked_pairs = 0;
+		uint64_t blocked_nodes = 0;
+		uint64_t blocked_triangles = 0;
+		uint32_t frame = 0;
+		for (double &timing : blocked_timings)
+		{
+			const auto start = std::chrono::steady_clock::now();
+			for (uint32_t index = 0; index < player_count; ++index)
+			{
+				const float motion = std::sin(static_cast<float>(frame) * 0.2f + static_cast<float>(index)) * 2.0f;
+				const float base_y = index < team_size ? -1976.0f : -16.0f;
+				blocked_players[index].origin.y = base_y + motion;
+				blocked_players[index].eye.y = base_y + motion;
+				set_test_capsules(blocked_players[index]);
+				blocked_origins[index] = visibility_origins(data, blocked_players[index], blocked_tuning);
+			}
+			uint32_t pair = 0;
+			for (uint32_t recipient = 0; recipient < player_count; ++recipient)
+			{
+				const uint32_t first_target = recipient < team_size ? team_size : 0u;
+				for (uint32_t target = first_target; target < first_target + team_size; ++target, ++pair)
+				{
+					bool blocked = true;
+					for (uint32_t origin_index = 0; origin_index < blocked_origins[recipient].count; ++origin_index)
+					{
+						capsule_query_stats stats;
+						const capsule_query_result query = capsule_visible_from_origin(data,
+							blocked_origins[recipient].points[origin_index], blocked_players[target].capsules,
+							nullptr, 0.0f, std::chrono::steady_clock::time_point::max(), nullptr, &stats,
+							&blocked_cache[pair * k_visibility_origin_count_max + origin_index]);
+						blocked_nodes += stats.visited_nodes;
+						blocked_triangles += stats.rasterized_triangles;
+						if (query != capsule_query_result::blocked)
+						{
+							blocked = false;
+							break;
+						}
+					}
+					blocked_pairs += blocked;
+				}
+			}
+			timing = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
+			++frame;
+		}
+		std::sort(blocked_timings.begin(), blocked_timings.end());
+		double blocked_average = 0.0;
+		for (double timing : blocked_timings) blocked_average += timing;
+		blocked_average /= blocked_timings.size();
+		std::cout << label << " blocked-5v5: average=" << blocked_average << "ms p99=" << blocked_timings.back()
+			<< "ms pairs=" << pair_count << " nodes=" << blocked_nodes / blocked_timings.size()
+			<< " triangles=" << blocked_triangles / blocked_timings.size() << '\n' << std::flush;
+		assert(blocked_pairs == pair_count * blocked_timings.size());
+		assert(blocked_average < 5.0);
+	}
+
 	constexpr uint32_t k_players = 20;
 	const visibility_tuning tuning {48.0f, 0.4f, 128.0f};
 	std::mt19937 random(0x51f0u);
@@ -862,25 +953,8 @@ double benchmark_worker_loop(const bvh8_data &data, const std::string &label)
 		};
 		set_test_capsules(players[i]);
 	}
-	smoke_snapshot smoke;
-	smoke.volumes.emplace_back();
-	smoke.volumes.back().center = {
-		(data.header.world_min[0] + data.header.world_max[0]) * 0.5f,
-		(data.header.world_min[1] + data.header.world_max[1]) * 0.5f,
-		(data.header.world_min[2] + data.header.world_max[2]) * 0.5f
-	};
-	smoke.volumes.back().age_seconds = 2.0f;
-	smoke.volumes.back().density.fill(50.0f);
-	smoke.he_clear_radius_units = 100.0f;
-	smoke.he_clear_seconds = 3.0f;
-	smoke.he_clearance_count = 4;
-	for (uint32_t index = 0; index < smoke.he_clearance_count; ++index)
-	{
-		smoke.he_clearances[index] = {{smoke.volumes.back().center.x + static_cast<float>(index) * 25.0f,
-			smoke.volumes.back().center.y, smoke.volumes.back().center.z}, 1.0f};
-	}
-
 	std::vector<uint32_t> cache(k_players * k_players * k_visibility_origin_count_max, k_invalid_ref);
+	std::vector<capsule_occluder_cache> occluder_cache(k_players * k_players * k_visibility_origin_count_max);
 	std::array<double, 20> timings {};
 	uint64_t blocked_pairs = 0;
 	uint64_t sampled_pixels = 0;
@@ -908,9 +982,11 @@ double benchmark_worker_loop(const bvh8_data &data, const std::string &label)
 				{
 					const vec3 &origin = origins[recipient].points[origin_index];
 					uint32_t &cached = cache[(recipient * k_players + target) * k_visibility_origin_count_max + origin_index];
+					capsule_occluder_cache &cached_occluders =
+						occluder_cache[(recipient * k_players + target) * k_visibility_origin_count_max + origin_index];
 					capsule_query_stats stats;
 					const capsule_query_result query = capsule_visible_from_origin(data, origin, players[target].capsules,
-						&smoke, 0.0f, std::chrono::steady_clock::time_point::max(), nullptr, &stats);
+						nullptr, 0.0f, std::chrono::steady_clock::time_point::max(), nullptr, &stats, &cached_occluders);
 					sampled_pixels += stats.sampled_pixels;
 					traced_rays += stats.traced_rays;
 					visited_nodes += stats.visited_nodes;
@@ -926,7 +1002,7 @@ double benchmark_worker_loop(const bvh8_data &data, const std::string &label)
 						const ray_hit hit = segment_blocked(data, origin, muzzle, cached);
 						cached = hit.packet_index;
 						++traced_rays;
-						if (!hit.blocked && !smoke_line_blocked(smoke, origin, muzzle, 0.0f, &data))
+						if (!hit.blocked)
 						{
 							blocked = false;
 							break;
