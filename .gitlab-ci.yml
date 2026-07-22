@@ -2,8 +2,8 @@ stages:
   - build
 
 variables:
-  MMS_COMMIT: "0084b86af4b08614ed6b95485d072b5aa2e88cdc"
-  HL2SDK_COMMIT: "dc8e7324b1e7f3cb115b1a861280a30ba5ce72a2"
+  MMS_COMMIT: "0f563c1e8f19dd463135dc8dd2ce12e8c9d6dc2c"
+  HL2SDK_COMMIT: "80cf8554d716a3841fe0680013cae3411a056a8d"
   AMBUILD_COMMIT: "d89ec91a7ac2607da07b50bb62346f9a10e9a998"
   VRF_VERSION: "19.2"
 
@@ -39,7 +39,7 @@ linux-x86_64:
     - python3 ../configure.py
     - python3 -c "from ambuild2.run import cli_run; cli_run()"
     - cd ..
-    - ./build-linux/cs2fow_tests/linux-x86_64/cs2fow_tests ./data/maps/de_mirage.bvh8
+    - ./build-linux/cs2fow_tests/linux-x86_64/cs2fow_tests
     - python3 -m unittest -v tests/test_package.py
     - node --check tools/visibility_point_editor/capsule_visibility.js
     - node --check tools/visibility_point_editor/bvh8.js
