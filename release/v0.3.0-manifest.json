@@ -1,0 +1,39 @@
+{
+  "version": "0.3.0",
+  "source_commit": "e708e66fd41a294aed6044285524303eed13efed",
+  "cs2_app_id": 730,
+  "cs2_build_id": "24304127",
+  "cs2_last_updated_unix": 1784618263,
+  "bvh8_format_version": 3,
+  "bake_recipe_version": 1,
+  "official_maps": [
+    "ar_baggage",
+    "ar_pool_day",
+    "ar_shoots",
+    "ar_shoots_night",
+    "cs_italy",
+    "cs_office",
+    "cs_shelter",
+    "de_ancient",
+    "de_ancient_night",
+    "de_anubis",
+    "de_boulder",
+    "de_cache",
+    "de_debris",
+    "de_dust2",
+    "de_eldorado",
+    "de_fachwerk",
+    "de_inferno",
+    "de_mirage",
+    "de_nuke",
+    "de_overpass",
+    "de_poseidon",
+    "de_train",
+    "de_vertigo"
+  ],
+  "artifacts": {
+    "cs2fow-0.3.0-windows-x86_64.zip": "9aad98988ff8da6e539b458a6bbb1e20ea8e2e66b5b93afada0d1f681c52c2b0",
+    "cs2fow-0.3.0-linux-x86_64.zip": "00ac87a02c7b29f8dd7d67007dba8f686b7a7c6720cf1d9154ea98c4324f359b",
+    "cs2fow-0.3.0-official-maps.zip": "f32a683fc06cc4db242db49b157a98a407cb083260d5c3d51a43f8cc050f1e10"
+  }
+}
