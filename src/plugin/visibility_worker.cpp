@@ -148,7 +148,11 @@ void visibility_worker::stop()
 		active_job_.reset();
 		workers_done_ = 0;
 	}
+#if defined(__cpp_lib_atomic_shared_ptr) && __cpp_lib_atomic_shared_ptr >= 201711L
 	published_.store({});
+#else
+	std::atomic_store(&published_, std::shared_ptr<const visibility_result> {});
+#endif
 	data_ = nullptr;
 }
 
@@ -166,7 +170,11 @@ void visibility_worker::submit(visibility_snapshot value, uint32_t hold_ms, visi
 
 std::shared_ptr<const visibility_result> visibility_worker::result() const
 {
+#if defined(__cpp_lib_atomic_shared_ptr) && __cpp_lib_atomic_shared_ptr >= 201711L
 	return published_.load();
+#else
+	return std::atomic_load(&published_);
+#endif
 }
 
 worker_stats visibility_worker::stats() const
@@ -471,7 +479,11 @@ void visibility_worker::publish(job &current)
 		recent_worker_next_ = (recent_worker_next_ + 1u) % static_cast<uint32_t>(recent_worker_ms_.size());
 		recent_worker_count_ = std::min(recent_worker_count_ + 1u, static_cast<uint32_t>(recent_worker_ms_.size()));
 	}
+#if defined(__cpp_lib_atomic_shared_ptr) && __cpp_lib_atomic_shared_ptr >= 201711L
 	published_.store(std::shared_ptr<const visibility_result> {std::move(current.result)});
+#else
+	std::atomic_store(&published_, std::shared_ptr<const visibility_result> {std::move(current.result)});
+#endif
 }
 
 } // namespace cs2fow

@@ -194,7 +194,12 @@ private:
 	uint64_t job_generation_ {};
 	std::vector<std::thread> threads_;
 	std::shared_ptr<job> active_job_;
+#if defined(__cpp_lib_atomic_shared_ptr) && __cpp_lib_atomic_shared_ptr >= 201711L
 	std::atomic<std::shared_ptr<const visibility_result>> published_;
+#else
+	// SteamRT3's GCC 10 uses the C++11 atomic shared_ptr free functions.
+	std::shared_ptr<const visibility_result> published_;
+#endif
 	std::array<std::array<std::array<uint32_t, k_visibility_origin_count_max>, k_max_players>, k_max_players> cached_packets_ {};
 	std::array<std::array<std::array<capsule_occluder_cache,
 		k_visibility_origin_count_max>, k_max_players>, k_max_players> cached_occluders_ {};
